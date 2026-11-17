@@ -1,0 +1,16 @@
+# Render Blueprint — deploy KOTA KITA sebagai satu Web Service Docker.
+# Cara pakai: hubungkan repo GitHub ini ke Render, pilih "Blueprint",
+# Render membaca file ini dan membuat layanannya otomatis.
+# Catatan jujur paket gratis: layanan tidur setelah ±15 menit sepi
+# (bangun lagi ±1 menit saat ada yang membuka), dan data akun di folder
+# /app/data bisa ter-reset saat deploy ulang. Untuk pemain sungguhan,
+# naikkan ke paket berbayar + persistent disk (mount path /app/data).
+services:
+  - type: web
+    name: kota-kita
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
