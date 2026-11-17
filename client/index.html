@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>KOTA KITA — Kota Virtual Indonesia</title>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!-- ===== Overlay mulai: buat avatar ===== -->
+    <div id="start-overlay">
+      <div class="card">
+        <h1>🏙️ KOTA KITA</h1>
+        <p class="tagline">Kota virtual Indonesia — jalan-jalan, ngobrol, dan foto bareng teman.</p>
+
+        <div id="auth-box">
+          <div class="chips" id="auth-tabs">
+            <button class="chip selected" data-mode="login">Masuk</button>
+            <button class="chip" data-mode="register">Daftar</button>
+            <button class="chip" data-mode="guest">Tamu</button>
+          </div>
+          <div id="auth-fields">
+            <input id="auth-username" placeholder="Nama pengguna akun" autocomplete="username" maxlength="16" />
+            <input id="auth-password" type="password" placeholder="Kata sandi" autocomplete="current-password" />
+          </div>
+          <p id="auth-status" class="note">Punya akun = nama &amp; tampilan avatarmu tersimpan permanen, bisa tambah teman. Tamu = langsung main, tidak tersimpan.</p>
+          <div id="auth-loggedin" class="hidden">
+            <span id="auth-user-label"></span>
+            <button id="btn-logout" class="chip">Keluar</button>
+          </div>
+        </div>
+
+        <label class="field-label" for="name-input">Nama tampilan</label>
+        <input id="name-input" maxlength="16" placeholder="Mis: Budi" autocomplete="off" />
+
+        <label class="field-label">Warna baju</label>
+        <div class="swatches" id="shirt-swatches">
+          <button class="swatch" data-color="#d64545" style="background:#d64545" aria-label="Merah"></button>
+          <button class="swatch" data-color="#2e8c83" style="background:#2e8c83" aria-label="Teal"></button>
+          <button class="swatch" data-color="#e3b23c" style="background:#e3b23c" aria-label="Kuning"></button>
+          <button class="swatch" data-color="#3b4a6b" style="background:#3b4a6b" aria-label="Biru tua"></button>
+          <button class="swatch" data-color="#7a4a9e" style="background:#7a4a9e" aria-label="Ungu"></button>
+          <button class="swatch" data-color="#e3772e" style="background:#e3772e" aria-label="Oranye"></button>
+        </div>
+
+        <label class="field-label">Warna kulit</label>
+        <div class="swatches" id="skin-swatches">
+          <button class="swatch" data-color="#ffe0bd" style="background:#ffe0bd" aria-label="Terang"></button>
+          <button class="swatch" data-color="#f1c27d" style="background:#f1c27d" aria-label="Kuning langsat"></button>
+          <button class="swatch" data-color="#c68642" style="background:#c68642" aria-label="Sawo matang"></button>
+          <button class="swatch" data-color="#8d5524" style="background:#8d5524" aria-label="Gelap"></button>
+        </div>
+
+        <label class="field-label">Warna celana</label>
+        <div class="swatches" id="pants-swatches">
+          <button class="swatch" data-color="#3b4a6b" style="background:#3b4a6b" aria-label="Biru"></button>
+          <button class="swatch" data-color="#4a4a4a" style="background:#4a4a4a" aria-label="Abu"></button>
+          <button class="swatch" data-color="#7a4a2b" style="background:#7a4a2b" aria-label="Cokelat"></button>
+          <button class="swatch" data-color="#2e6b34" style="background:#2e6b34" aria-label="Hijau"></button>
+        </div>
+
+        <label class="field-label">Model baju</label>
+        <div class="chips" id="shirtstyle-chips">
+          <button class="chip selected" data-value="polos">Polos</button>
+          <button class="chip" data-value="batik">Batik</button>
+        </div>
+
+        <label class="field-label">Gaya rambut / penutup kepala</label>
+        <div class="chips" id="hair-chips">
+          <button class="chip selected" data-value="pendek">Pendek</button>
+          <button class="chip" data-value="panjang">Panjang</button>
+          <button class="chip" data-value="hijab">Hijab</button>
+          <button class="chip" data-value="peci">Peci</button>
+          <button class="chip" data-value="botak">Botak</button>
+        </div>
+
+        <label class="field-label">Warna rambut / hijab / peci</label>
+        <div class="swatches" id="haircolor-swatches">
+          <button class="swatch" data-color="#3a2a1c" style="background:#3a2a1c" aria-label="Cokelat tua"></button>
+          <button class="swatch" data-color="#17130f" style="background:#17130f" aria-label="Hitam"></button>
+          <button class="swatch" data-color="#8a5a33" style="background:#8a5a33" aria-label="Cokelat"></button>
+          <button class="swatch" data-color="#c94f30" style="background:#c94f30" aria-label="Merah bata"></button>
+          <button class="swatch" data-color="#e3b23c" style="background:#e3b23c" aria-label="Kuning madu"></button>
+          <button class="swatch" data-color="#2e8c83" style="background:#2e8c83" aria-label="Teal"></button>
+        </div>
+
+        <button id="btn-start">Masuk Kota →</button>
+        <p id="start-note" class="note">Kalau server belum menyala, kamu tetap bisa jalan-jalan sendiri (mode offline).</p>
+      </div>
+    </div>
+
+    <!-- ===== UI permainan ===== -->
+    <div id="game-ui" class="hidden">
+      <div id="topbar">
+        <div class="top-left">
+          <span id="conn-status">🟡 Menghubungkan…</span>
+          <span id="player-count">👥 1 pemain</span>
+        </div>
+        <div class="top-right">
+          <button id="btn-friends" class="icon-btn" title="Teman & pemain">👥</button>
+          <button id="btn-sound" class="icon-btn" title="Suara nyala/mati">🔊</button>
+          <button id="btn-daynight" class="icon-btn" title="Siang / malam">🌙</button>
+          <button id="btn-photo" class="icon-btn" title="Ambil foto">📸</button>
+        </div>
+      </div>
+
+      <div id="joystick"><div id="joystick-knob"></div></div>
+
+      <div id="emote-bar" class="hidden">
+        <button data-emote="wave">👋 Melambai</button>
+        <button data-emote="dance">💃 Menari</button>
+        <button data-emote="sit">🪑 Duduk</button>
+        <button data-emote="laugh">😂 Tertawa</button>
+        <button data-emote="clap">👏 Tepuk tangan</button>
+      </div>
+
+      <div id="controls-right">
+        <button id="btn-interact" class="action-btn wide hidden">✋ <span id="interact-label">Interaksi</span></button>
+        <button id="btn-chat" class="action-btn" title="Obrolan">💬</button>
+        <button id="btn-emote" class="action-btn" title="Emote">😄</button>
+        <button id="btn-run" class="action-btn" title="Lari (nyala/mati)">🏃</button>
+        <button id="btn-jump" class="action-btn big" title="Lompat">⬆️</button>
+      </div>
+
+      <div id="chat-panel">
+        <div id="chat-messages"></div>
+        <form id="chat-form">
+          <input id="chat-input" maxlength="120" placeholder="Ketik pesan…" autocomplete="off" />
+          <button type="submit">Kirim</button>
+        </form>
+      </div>
+
+      <div id="friends-panel" class="hidden">
+        <h3>👥 Teman &amp; Pemain</h3>
+        <div class="friends-label">Temanmu</div>
+        <div id="friends-list"><p class="friends-empty">Belum ada teman. Tambahkan lewat nama pengguna akunnya.</p></div>
+        <form id="friend-add-form">
+          <input id="friend-add-input" placeholder="Nama pengguna teman…" maxlength="16" autocomplete="off" />
+          <button type="submit">Tambah</button>
+        </form>
+        <div class="friends-label">Pemain di kota saat ini</div>
+        <div id="nearby-list"></div>
+        <button id="btn-friends-close">Tutup</button>
+      </div>
+
+      <div id="interact-card" class="hidden">
+        <h3 id="interact-title"></h3>
+        <p id="interact-desc"></p>
+        <button id="btn-interact-close">Tutup</button>
+      </div>
+
+      <div id="toast" class="hidden"></div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
