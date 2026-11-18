@@ -35,6 +35,17 @@ import {
   homePoint,
   plots as plotStore,
 } from "../housing/housing";
+import {
+  LAPAKS,
+  LAPAK_BY_ID,
+  LAPAK_PRICE,
+  LAPAK_NEAR_RADIUS,
+  CATALOG,
+  CATALOG_IDS,
+  lapakFront,
+  stallBox,
+  market as marketStore,
+} from "../market/market";
 
 /** Keadaan publik satu kavling Kampung Kita (Tahap 6) — cukup untuk menggambar distrik yang sama di semua klien. */
 export class PlotState extends Schema {
@@ -42,11 +53,31 @@ export class PlotState extends Schema {
   @type("number") house: number = 0; // 0 = tanah kosong, 1..3 = tingkat rumah
 }
 
+/** Satu barang di menu lapak (Tahap 7) — PUBLIK: harga & stok untuk panel pembeli. */
+export class LapakItemState extends Schema {
+  @type("number") price: number = 0;
+  @type("boolean") stocked: boolean = false;
+}
+
+/**
+ * Keadaan publik satu lapak Pasar (Tahap 7): pemilik, nama lapak, menu.
+ * KAS USAHA & LOG PENJUALAN TIDAK ADA di sini — keduanya privat, hanya
+ * dikirim ke pemilik lewat pesan "lapak_mine".
+ */
+export class LapakState extends Schema {
+  @type("string") owner: string = ""; // nama pengguna akun pemilik ("" = kosong)
+  @type("string") name: string = ""; // nama lapak ("" = belum diklaim)
+  @type({ map: LapakItemState }) menu = new MapSchema<LapakItemState>();
+}
+
 export class KotaState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>();
   @type({ map: PlotState }) plots = new MapSchema<PlotState>();
   /** Jumlah rumah yang berdiri di kota (statistik awal untuk Tahap 8). */
   @type("number") housesBuilt: number = 0;
+  @type({ map: LapakState }) lapaks = new MapSchema<LapakState>();
+  /** Jumlah lapak yang sudah dimiliki warga (statistik awal untuk Tahap 8). */
+  @type("number") lapaksActive: number = 0;
   /** Fraksi hari dunia 0..1 dari jam server (Tahap 6B) — semua klien menggambar langit yang sama. */
   @type("number") worldTime: number = 0;
   /** True saat dunia sedang malam menurut jam server. */
@@ -111,12 +142,12 @@ export const WALK_SPEED = 4;
 export const RUN_SPEED = 7;
 export const GRAVITY = 22;
 export const JUMP_VELOCITY = 8.2;
-// Batas dunia: plaza lama ±42 m, Kampung Kita memanjang ke timur (Tahap 6).
-// HARUS sama dengan batas di client (main.ts).
+// Batas dunia: plaza lama ±42 m, Kampung Kita memanjang ke timur (Tahap 6),
+// Pasar memanjang ke selatan (Tahap 7). HARUS sama dengan batas di client (main.ts).
 const BOUND_MIN_X = -42;
 const BOUND_MAX_X = 136;
 const BOUND_MIN_Z = -42;
-const BOUND_MAX_Z = 42;
+const BOUND_MAX_Z = 70;
 const FOUNTAIN_RADIUS = 3.6; // lingkaran tabrakan air mancur di (0,0)
 const CHAT_MAX = 120;
 const CHAT_MIN_INTERVAL_MS = 800;
@@ -145,6 +176,16 @@ function filterChat(text: string): string {
   return out;
 }
 
+/**
+ * Sanitasi nama lapak (Tahap 7): buang karakter kontrol, sensor kata kasar
+ * (pendekatan yang sama seperti chat), potong 20 karakter. "" = tidak sah.
+ */
+function cleanLapakName(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const cleaned = raw.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 20);
+  return filterChat(cleaned).trim();
+}
+
 export class KotaRoom extends Room<KotaState> {
   private inputs = new Map<string, InputData>();
   private verticalVel = new Map<string, number>();
@@ -167,6 +208,10 @@ export class KotaRoom extends Room<KotaState> {
   private lastNeedsPersistAt = 0;
   /** Kotak tabrakan rumah yang sedang berdiri (Tahap 6) — diturunkan dari data kavling, dibangun ulang tiap ada perubahan. */
   private houseBoxes: Array<readonly [number, number, number, number]> = [];
+  /** Kotak tabrakan meja lapak yang sudah dimiliki (Tahap 7) — diturunkan dari data pasar, dibangun ulang tiap ada perubahan. */
+  private stallBoxes: Array<readonly [number, number, number, number]> = [];
+  /** Gabungan kotak dinamis (rumah + lapak) yang ditegakkan loop simulasi. */
+  private dynamicBoxes: Array<readonly [number, number, number, number]> = [];
 
   onCreate() {
     this.setState(new KotaState());
@@ -176,6 +221,8 @@ export class KotaRoom extends Room<KotaState> {
     this.state.isNight = isWorldNight();
     // Kampung Kita (Tahap 6): muat kepemilikan kavling persisten ke state publik.
     this.syncPlotsState();
+    // Pasar (Tahap 7): muat kepemilikan lapak persisten ke state publik.
+    this.syncLapaksState();
 
     this.onMessage("input", (client, data: Partial<InputData>) => {
       // Server tidak memercayai klien: hanya arah yang diterima,
@@ -590,6 +637,161 @@ export class KotaRoom extends Room<KotaState> {
       });
     });
 
+    // --- Usaha Pemain (Tahap 7): klaim lapak, atur menu, jual-beli, kas usaha ---
+    // Semua validasi & perpindahan KC terjadi di server dalam satu langkah
+    // sinkron: bila satu syarat gagal, TIDAK ada perubahan apa pun.
+    // Kas usaha & log penjualan PRIVAT — hanya dikirim ke pemilik lewat
+    // pesan "lapak_mine"; state room hanya memuat pemilik, nama & menu.
+    this.onMessage("lapak_claim", (client, data: { lapakId?: unknown }) => {
+      const reject = (message: string) => client.send("lapak_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Klaim lapak hanya untuk pemain yang masuk dengan akun. Tamu tidak punya saldo.");
+      const def = typeof data?.lapakId === "string" ? LAPAK_BY_ID.get(data.lapakId) : undefined;
+      if (!def) return reject("Lapak tidak dikenal.");
+      if (marketStore.get(def.id)) return reject(`Lapak No. ${def.number} sudah ada pemiliknya. Cari yang masih kosong ya.`);
+      const mine = marketStore.lapakOfAccount(me);
+      if (mine) {
+        const owned = LAPAK_BY_ID.get(mine);
+        return reject(`Kamu sudah punya Lapak No. ${owned?.number}. Satu akun hanya boleh satu lapak.`);
+      }
+      const paid = accounts.spendKC(me, LAPAK_PRICE, `Klaim Lapak No. ${def.number}`);
+      if (!paid.ok) return reject(paid.error ?? "Saldo tidak cukup.");
+      const ownerName = accounts.getUser(me)?.username ?? me;
+      marketStore.claim(def.id, me, ownerName);
+      this.syncLapaksState();
+      client.send("lapak_result", {
+        ok: true,
+        message: `Selamat! Lapak No. ${def.number} di Pasar sekarang milikmu 🎉 (−${LAPAK_PRICE} KC) Atur nama, harga & stoknya ya!`,
+      });
+      client.send("balance", { balance: paid.balance });
+      this.sendLapakMine(client.sessionId);
+    });
+
+    this.onMessage("lapak_set_name", (client, data: { name?: unknown }) => {
+      const reject = (message: string) => client.send("lapak_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Atur lapak hanya untuk pemilik yang masuk dengan akun.");
+      const myLapakId = marketStore.lapakOfAccount(me);
+      if (!myLapakId) return reject("Kamu belum punya lapak. Klaim dulu di Pasar ya.");
+      const name = cleanLapakName(data?.name);
+      if (!name) return reject("Nama lapak tidak boleh kosong (maks. 20 huruf).");
+      marketStore.setName(myLapakId, name);
+      this.syncLapaksState();
+      client.send("lapak_result", { ok: true, message: `Nama lapakmu sekarang "${name}" 🏪` });
+    });
+
+    this.onMessage("lapak_set_item", (client, data: { itemId?: unknown; price?: unknown; stocked?: unknown }) => {
+      const reject = (message: string) => client.send("lapak_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Atur lapak hanya untuk pemilik yang masuk dengan akun.");
+      const myLapakId = marketStore.lapakOfAccount(me);
+      if (!myLapakId) return reject("Kamu belum punya lapak. Klaim dulu di Pasar ya.");
+      const item = typeof data?.itemId === "string" ? CATALOG[data.itemId] : undefined;
+      if (!item) return reject("Barang tidak dikenal.");
+      const rec = marketStore.get(myLapakId);
+      if (!rec) return reject("Data lapakmu tidak ditemukan.");
+      const current = rec.menu[item.id] ?? { price: item.defaultPrice, stocked: true };
+      const price = typeof data?.price === "number" && Number.isFinite(data.price) ? Math.round(data.price) : current.price;
+      if (price < item.minPrice || price > item.maxPrice) {
+        return reject(`Harga ${item.name} harus di antara ${item.minPrice}–${item.maxPrice} KC (diatur sistem).`);
+      }
+      const stocked = typeof data?.stocked === "boolean" ? data.stocked : current.stocked;
+      marketStore.setMenuItem(myLapakId, item.id, price, stocked);
+      this.syncLapaksState();
+      client.send("lapak_result", {
+        ok: true,
+        message: `${item.name}: harga ${price} KC, ${stocked ? "tersedia ✅" : "stok ditutup 🚫"}`,
+      });
+    });
+
+    this.onMessage("lapak_buy", (client, data: { lapakId?: unknown; itemId?: unknown }) => {
+      const reject = (message: string) => client.send("lapak_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Belanja di lapak butuh akun — tamu tidak punya saldo. Daftar dulu ya!");
+      const def = typeof data?.lapakId === "string" ? LAPAK_BY_ID.get(data.lapakId) : undefined;
+      if (!def) return reject("Lapak tidak dikenal.");
+      const rec = marketStore.get(def.id);
+      if (!rec) return reject(`Lapak No. ${def.number} belum ada pemiliknya — belum bisa belanja di sini.`);
+      if (rec.owner === me) return reject("Ini lapakmu sendiri — tidak bisa belanja di lapak sendiri. 😄");
+      const item = typeof data?.itemId === "string" ? CATALOG[data.itemId] : undefined;
+      if (!item) return reject("Barang tidak dikenal.");
+      const entry = rec.menu[item.id];
+      if (!entry || !entry.stocked) return reject(`${item.name} sedang tidak tersedia di lapak ini.`);
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return reject("Data pemainmu tidak ditemukan.");
+      const front = lapakFront(def);
+      if (Math.hypot(player.x - front.x, player.z - front.z) > LAPAK_NEAR_RADIUS) {
+        return reject(`Datangi dulu depan ${rec.name} untuk belanja ya.`);
+      }
+      const needs = this.needsMap.get(client.sessionId);
+      if (!needs) return reject("Data kebutuhanmu tidak ditemukan.");
+      const price = entry.price;
+      // Semua validasi lolos → terapkan SEKALIGUS (sinkron, tanpa jeda):
+      // potong saldo pembeli lewat jalur resmi; bila gagal, berhenti di sini
+      // dan tidak ada perubahan lain (kas, meter, log semua batal).
+      const paid = accounts.spendKC(me, price, `Beli ${item.name} di ${rec.name}`);
+      if (!paid.ok) return reject(paid.error ?? "Saldo tidak cukup.");
+      marketStore.recordSale(def.id, accounts.getUser(me)?.username ?? me, item.id, price);
+      // Efek kebutuhan pembeli (suvenir batik: koleksi persisten, tanpa efek meter).
+      let effectNote = "";
+      if (item.need === "thirst") {
+        needs.thirst = Math.min(100, needs.thirst + item.restore);
+        effectNote = " 💧 Hausmu berkurang banyak!";
+      } else if (item.need === "hunger") {
+        needs.hunger = Math.min(100, needs.hunger + item.restore);
+        effectNote = " 🍗 Laparmu berkurang banyak!";
+      } else if (item.id === "batik") {
+        const total = accounts.addSouvenir(me);
+        effectNote = ` 🎁 Batik masuk koleksimu (total ${total} suvenir).`;
+      }
+      accounts.setNeeds(me, needs);
+      this.sendNeeds(client.sessionId, true);
+      client.send("balance", { balance: paid.balance });
+      client.send("lapak_result", {
+        ok: true,
+        message: `${item.name} terbeli dari ${rec.name} — ${price} KC.${effectNote} Saldo sekarang ${paid.balance} KC.`,
+      });
+      // Kabari pemilik bila sedang online: kas & log barunya (privat).
+      const ownerSession = [...this.sessionAccount.entries()].find(([, acc]) => acc === rec.owner)?.[0];
+      if (ownerSession) {
+        this.sendLapakMine(ownerSession);
+        const ownerClient = this.clients.find((c) => c.sessionId === ownerSession);
+        ownerClient?.send("lapak_event", {
+          message: `🔔 ${accounts.getUser(me)?.username ?? me} membeli ${item.name} (${price} KC) di lapakmu! Kas usaha bertambah.`,
+        });
+      }
+    });
+
+    this.onMessage("lapak_collect", (client) => {
+      const reject = (message: string) => client.send("lapak_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Ambil kas hanya untuk pemilik yang masuk dengan akun.");
+      const myLapakId = marketStore.lapakOfAccount(me);
+      if (!myLapakId) return reject("Kamu belum punya lapak — tidak ada kas untuk diambil.");
+      const def = LAPAK_BY_ID.get(myLapakId);
+      const rec = marketStore.get(myLapakId);
+      const player = this.state.players.get(client.sessionId);
+      if (!def || !rec || !player) return reject("Data lapakmu tidak ditemukan.");
+      const front = lapakFront(def);
+      if (Math.hypot(player.x - front.x, player.z - front.z) > LAPAK_NEAR_RADIUS) {
+        return reject("Ambil kas dilakukan di depan lapakmu sendiri — datangi lapakmu dulu ya.");
+      }
+      if (rec.kas <= 0) return reject("Kas usahamu masih kosong — belum ada penjualan. Semangat jualannya! 💪");
+      const amount = marketStore.collectKas(myLapakId);
+      const credited = accounts.creditKC(me, amount, `Ambil kas ${rec.name}`);
+      if (!credited.ok) return reject(credited.error ?? "Gagal memindahkan kas.");
+      client.send("lapak_result", {
+        ok: true,
+        message: `Kas usaha diambil: +${amount} KC masuk saldomu 💰 Saldo sekarang ${credited.balance} KC.`,
+      });
+      client.send("balance", { balance: credited.balance });
+      this.sendLapakMine(client.sessionId);
+    });
+
+    this.onMessage("lapak_mine_get", (client) => {
+      this.sendLapakMine(client.sessionId);
+    });
+
     // Simulasi gerak otoritatif, 20x per detik.
     this.setSimulationInterval((deltaMs) => this.simulate(deltaMs / 1000), 50);
   }
@@ -699,6 +901,62 @@ export class KotaRoom extends Room<KotaState> {
     }
     this.houseBoxes = boxes;
     this.state.housesBuilt = plotStore.houseCount();
+    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes];
+  }
+
+  // ---------- Usaha Pemain (Tahap 7) ----------
+
+  /**
+   * Salin kepemilikan + menu lapak persisten ke state PUBLIK + bangun ulang
+   * kotak tabrakan meja lapak. Kas & log penjualan TIDAK ikut — privat.
+   * Lapak yang belum diklaim tampil dengan menu bawaan & stok tertutup.
+   */
+  private syncLapaksState() {
+    const boxes: Array<readonly [number, number, number, number]> = [];
+    for (const def of LAPAKS) {
+      const rec = marketStore.get(def.id);
+      let entry = this.state.lapaks.get(def.id);
+      if (!entry) {
+        entry = new LapakState();
+        this.state.lapaks.set(def.id, entry);
+      }
+      entry.owner = rec?.ownerName ?? "";
+      entry.name = rec?.name ?? "";
+      for (const itemId of CATALOG_IDS) {
+        let itemState = entry.menu.get(itemId);
+        if (!itemState) {
+          itemState = new LapakItemState();
+          entry.menu.set(itemId, itemState);
+        }
+        const menuEntry = rec?.menu[itemId];
+        itemState.price = menuEntry?.price ?? CATALOG[itemId].defaultPrice;
+        itemState.stocked = rec ? (menuEntry?.stocked ?? true) : false;
+      }
+      if (rec) boxes.push(stallBox(def));
+    }
+    this.stallBoxes = boxes;
+    this.state.lapaksActive = marketStore.ownedCount();
+    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes];
+  }
+
+  /**
+   * Kirim data PRIVAT lapak ke pemiliknya saja (kas usaha, log penjualan,
+   * jumlah suvenir). Tidak pernah disiarkan & tidak ada di state room.
+   * Sesi tamu / akun tanpa lapak menerima lapakId "" (tidak punya lapak).
+   */
+  private sendLapakMine(sessionId: string) {
+    const client = this.clients.find((c) => c.sessionId === sessionId);
+    if (!client) return;
+    const me = this.sessionAccount.get(sessionId);
+    const myLapakId = me ? marketStore.lapakOfAccount(me) : null;
+    const rec = myLapakId ? marketStore.get(myLapakId) : null;
+    const eco = me ? accounts.getEconomy(me) : null;
+    client.send("lapak_mine", {
+      lapakId: myLapakId ?? "",
+      kas: rec?.kas ?? 0,
+      sales: (rec?.sales ?? []).map((s) => ({ buyer: s.buyer, item: s.item, price: s.price, ts: s.ts })),
+      souvenirs: eco?.souvenirs ?? 0,
+    });
   }
 
   // ---------- Ekonomi (Tahap 5 + 6B) ----------
@@ -982,8 +1240,8 @@ export class KotaRoom extends Room<KotaState> {
         player.z *= push;
       }
 
-      // Tabrakan bangunan (AABB sederhana) + rumah pemain yang berdiri (Tahap 6).
-      resolveCollisions(player, this.houseBoxes);
+      // Tabrakan bangunan (AABB sederhana) + rumah & meja lapak pemain (Tahap 6 + 7).
+      resolveCollisions(player, this.dynamicBoxes);
 
       // Animasi. Emote yang masih aktif menang, kecuali pemain sedang di udara.
       const emote = this.emoteUntil.get(sessionId);
