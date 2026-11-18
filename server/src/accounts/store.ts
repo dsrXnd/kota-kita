@@ -257,6 +257,26 @@ export class AccountStore {
     return balance;
   }
 
+  /**
+   * Belanja KC (Tahap 6: klaim kavling & bangun rumah). Ditolak bila saldo
+   * kurang — saldo tidak pernah boleh negatif. Mengembalikan saldo baru.
+   */
+  spendKC(usernameLower: string, amount: number, reason: string): { ok: boolean; balance: number; error?: string } {
+    const user = this.db.users[usernameLower];
+    if (!user) return { ok: false, balance: 0, error: "Akun tidak ditemukan." };
+    if (!Number.isFinite(amount) || amount <= 0) return { ok: false, balance: user.economy.balance, error: "Jumlah tidak sah." };
+    if (user.economy.balance < amount) {
+      return {
+        ok: false,
+        balance: user.economy.balance,
+        error: `Saldo tidak cukup — perlu ${amount} KC, saldomu ${user.economy.balance} KC. Kerja dulu yuk!`,
+      };
+    }
+    const balance = this.applyDelta(user, -amount, reason);
+    this.save();
+    return { ok: true, balance };
+  }
+
   appendChatLog(entry: unknown) {
     appendFileSync(CHAT_LOG, JSON.stringify(entry) + "\n");
   }
