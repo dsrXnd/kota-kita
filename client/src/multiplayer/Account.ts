@@ -60,6 +60,19 @@ export async function loginAccount(username: string, password: string): Promise<
   return { username: data.username, profile: data.profile, lastOnline: data.lastOnline };
 }
 
+/** Musim kosmetik aktif menurut server (Tahap 9); null = tidak ada musim / server tak terjangkau. */
+export async function fetchSeason(): Promise<{ style: string; label: string } | null> {
+  try {
+    const res = await fetch(httpBase() + "/season");
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.season?.style) return null;
+    return { style: String(data.season.style), label: String(data.season.label ?? "") };
+  } catch {
+    return null;
+  }
+}
+
 /** Ambil profil akun dari token tersimpan; null bila sesi sudah tidak sah. */
 export async function fetchMe(): Promise<AccountInfo | null> {
   const token = savedToken();
