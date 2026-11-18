@@ -28,7 +28,8 @@
     "test:market": "node test/market.mjs",
     "test:load": "node test/load-50.mjs",
     "test:city": "node test/city.mjs",
-    "test:9": "node test/tahap9.mjs"
+    "test:9": "node test/tahap9.mjs",
+    "test:10": "node test/tahap10.mjs"
   },
   "type": "commonjs",
   "version": "0.1.0"
