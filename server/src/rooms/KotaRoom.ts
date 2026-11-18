@@ -1,5 +1,5 @@
 import { Room, Client } from "colyseus";
-import { Schema, MapSchema, type } from "@colyseus/schema";
+import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
 import { Player } from "../players/Player";
 import { resolveCollisions } from "./colliders";
 import { accounts, type ProfileData } from "../accounts/store";
@@ -46,6 +46,12 @@ import {
   stallBox,
   market as marketStore,
 } from "../market/market";
+import {
+  FACILITY_BY_ID,
+  MIN_YES,
+  facilityBoxes,
+  city as cityStore,
+} from "../city/city";
 
 /** Keadaan publik satu kavling Kampung Kita (Tahap 6) — cukup untuk menggambar distrik yang sama di semua klien. */
 export class PlotState extends Schema {
@@ -82,6 +88,8 @@ export class KotaState extends Schema {
   @type("number") worldTime: number = 0;
   /** True saat dunia sedang malam menurut jam server. */
   @type("boolean") isNight: boolean = false;
+  /** Id fasilitas kota yang sudah terbangun lewat voting (Tahap 8) — klien menggambar & menabraknya dari daftar ini. */
+  @type(["string"]) facilities = new ArraySchema<string>();
 }
 
 interface InputData {
@@ -210,7 +218,11 @@ export class KotaRoom extends Room<KotaState> {
   private houseBoxes: Array<readonly [number, number, number, number]> = [];
   /** Kotak tabrakan meja lapak yang sudah dimiliki (Tahap 7) — diturunkan dari data pasar, dibangun ulang tiap ada perubahan. */
   private stallBoxes: Array<readonly [number, number, number, number]> = [];
-  /** Gabungan kotak dinamis (rumah + lapak) yang ditegakkan loop simulasi. */
+  /** Kotak tabrakan fasilitas kota yang sudah terbangun (Tahap 8) — diturunkan dari daftar fasilitas aktif. */
+  private facilityBoxes: Array<readonly [number, number, number, number]> = [];
+  /** Kapan terakhir penutupan voting dievaluasi (±1 detik sekali di loop simulasi). */
+  private lastCityTickAt = 0;
+  /** Gabungan kotak dinamis (rumah + lapak + fasilitas) yang ditegakkan loop simulasi. */
   private dynamicBoxes: Array<readonly [number, number, number, number]> = [];
 
   onCreate() {
@@ -223,6 +235,12 @@ export class KotaRoom extends Room<KotaState> {
     this.syncPlotsState();
     // Pasar (Tahap 7): muat kepemilikan lapak persisten ke state publik.
     this.syncLapaksState();
+    // Kota Hidup (Tahap 8): catch-up penutupan voting yang tenggatnya lewat
+    // saat server mati, pastikan ada usulan aktif, lalu muat fasilitas
+    // terbangun ke state publik + collider-nya.
+    cityStore.evaluateClosing();
+    cityStore.ensureProposal();
+    this.syncCityState();
 
     this.onMessage("input", (client, data: Partial<InputData>) => {
       // Server tidak memercayai klien: hanya arah yang diterima,
@@ -573,6 +591,8 @@ export class KotaRoom extends Room<KotaState> {
       if (!paid.ok) return reject(paid.error ?? "Saldo tidak cukup.");
       const ownerName = accounts.getUser(me)?.username ?? me;
       plotStore.claim(def.id, me, ownerName);
+      // Kas kota (Tahap 8): biaya klaim kavling tercatat sebagai statistik kas kota.
+      cityStore.addKas(price);
       this.syncPlotsState();
       client.send("plot_result", {
         ok: true,
@@ -604,9 +624,21 @@ export class KotaRoom extends Room<KotaState> {
         return reject(`${house.name} hanya boleh dibangun di Kavling 2 (petak premium). Kavlingmu Kavling ${def.tier}.`);
       }
       const cost = house.price - HOUSE_PRICE[rec.house];
+      const wasEmpty = rec.house === 0;
       const paid = accounts.spendKC(me, cost, rec.house > 0 ? `Upgrade ke ${house.name}` : `Bangun ${house.name}`);
       if (!paid.ok) return reject(paid.error ?? "Saldo tidak cukup.");
       plotStore.setHouse(myPlotId, tier);
+      // Kas kota + Kabar Kota (Tahap 8): biaya bangun/upgrade tercatat;
+      // rumah pertama & upgrade sama-sama masuk umpan kabar.
+      cityStore.addKas(cost);
+      const ownerName = accounts.getUser(me)?.username ?? me;
+      cityStore.addNews(
+        wasEmpty ? "🏠" : "⬆️",
+        wasEmpty
+          ? `@${ownerName} membangun ${house.name} di Kavling ${def.tier} No. ${def.number} — rumah baru berdiri di Kampung Kita!`
+          : `@${ownerName} meningkatkan rumahnya menjadi ${house.name} di Kavling ${def.tier} No. ${def.number}.`
+      );
+      this.broadcast("news_update", {});
       this.syncPlotsState();
       client.send("plot_result", {
         ok: true,
@@ -658,6 +690,11 @@ export class KotaRoom extends Room<KotaState> {
       if (!paid.ok) return reject(paid.error ?? "Saldo tidak cukup.");
       const ownerName = accounts.getUser(me)?.username ?? me;
       marketStore.claim(def.id, me, ownerName);
+      // Kas kota + Kabar Kota (Tahap 8): biaya klaim lapak tercatat.
+      cityStore.addKas(LAPAK_PRICE);
+      const lapakName = marketStore.get(def.id)?.name ?? `Lapak ${ownerName}`;
+      cityStore.addNews("🏪", `@${ownerName} membuka "${lapakName}" (Lapak No. ${def.number}) di Pasar. Mampir ya!`);
+      this.broadcast("news_update", {});
       this.syncLapaksState();
       client.send("lapak_result", {
         ok: true,
@@ -792,6 +829,33 @@ export class KotaRoom extends Room<KotaState> {
       this.sendLapakMine(client.sessionId);
     });
 
+    // --- Kota Hidup (Tahap 8): statistik, Kabar Kota & voting fasilitas ---
+    // Panel kota bersifat baca-saja kecuali voting; semua angka berasal
+    // dari store server. Suara hanya untuk akun, 1 akun = 1 suara final.
+    this.onMessage("city_get", (client) => {
+      client.send("city", this.cityPayload(client.sessionId));
+    });
+
+    this.onMessage("vote_cast", (client, data: { choice?: unknown }) => {
+      const reject = (message: string) => client.send("vote_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Voting hanya untuk warga yang masuk dengan akun — tamu tidak bisa memilih. Daftar dulu ya!");
+      const choice = data?.choice === "yes" || data?.choice === "no" ? data.choice : null;
+      if (!choice) return reject("Pilihan tidak dikenal — pilih Setuju atau Tolak.");
+      const active = cityStore.activeProposal();
+      if (!active) return reject("Saat ini tidak ada usulan yang sedang divoting.");
+      const def = FACILITY_BY_ID.get(active.facilityId);
+      const result = cityStore.castVote(me, choice);
+      if (!result.ok) return reject(result.error ?? "Suaramu tidak bisa dicatat.");
+      client.send("vote_result", {
+        ok: true,
+        message: `Suaramu tercatat: ${choice === "yes" ? "SETUJU ✅" : "TOLAK ❌"} untuk ${def?.icon ?? ""} ${def?.name ?? "usulan ini"} (setuju ${result.yes} · tolak ${result.no}). Suara bersifat final.`,
+      });
+      client.send("city", this.cityPayload(client.sessionId));
+      // Klien lain yang panel kotanya terbuka menyegarkan tally-nya.
+      this.broadcast("news_update", {}, { except: client });
+    });
+
     // Simulasi gerak otoritatif, 20x per detik.
     this.setSimulationInterval((deltaMs) => this.simulate(deltaMs / 1000), 50);
   }
@@ -901,7 +965,7 @@ export class KotaRoom extends Room<KotaState> {
     }
     this.houseBoxes = boxes;
     this.state.housesBuilt = plotStore.houseCount();
-    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes];
+    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes, ...this.facilityBoxes];
   }
 
   // ---------- Usaha Pemain (Tahap 7) ----------
@@ -936,7 +1000,7 @@ export class KotaRoom extends Room<KotaState> {
     }
     this.stallBoxes = boxes;
     this.state.lapaksActive = marketStore.ownedCount();
-    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes];
+    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes, ...this.facilityBoxes];
   }
 
   /**
@@ -957,6 +1021,91 @@ export class KotaRoom extends Room<KotaState> {
       sales: (rec?.sales ?? []).map((s) => ({ buyer: s.buyer, item: s.item, price: s.price, ts: s.ts })),
       souvenirs: eco?.souvenirs ?? 0,
     });
+  }
+
+  // ---------- Kota Hidup (Tahap 8) ----------
+
+  /**
+   * Salin daftar fasilitas terbangun persisten ke state publik + bangun
+   * ulang kotak tabrakannya. Fasilitas hanya BERTAMBAH (tidak pernah
+   * dibongkar), jadi sinkronisasi cukup menambahkan yang belum ada.
+   */
+  private syncCityState() {
+    const built = cityStore.builtIds();
+    const current = new Set<string>();
+    this.state.facilities.forEach((f) => current.add(f));
+    for (const id of built) {
+      if (!current.has(id)) this.state.facilities.push(id);
+    }
+    const boxes: Array<readonly [number, number, number, number]> = [];
+    for (const id of built) boxes.push(...facilityBoxes(id));
+    this.facilityBoxes = boxes;
+    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes, ...this.facilityBoxes];
+  }
+
+  /** Payload panel kota untuk satu sesi: statistik, Kabar Kota, dan status voting (suara sesi ini ditandai). */
+  private cityPayload(sessionId: string) {
+    const me = this.sessionAccount.get(sessionId);
+    const active = cityStore.activeProposal();
+    const def = active ? FACILITY_BY_ID.get(active.facilityId) : undefined;
+    const tally = cityStore.tally(active);
+    const last = cityStore.lastResult();
+    const lastDef = last ? FACILITY_BY_ID.get(last.facilityId) : undefined;
+    return {
+      guest: !me,
+      residents: accounts.userCount(),
+      online: this.state.players.size,
+      houses: this.state.housesBuilt,
+      lapaks: this.state.lapaksActive,
+      kasKota: cityStore.kasKotaAmount(),
+      news: cityStore.recentNews(15),
+      vote:
+        active && def
+          ? {
+              facilityId: def.id,
+              name: def.name,
+              icon: def.icon,
+              desc: def.desc,
+              yes: tally.yes,
+              no: tally.no,
+              closesAt: active.closesAt,
+              minYes: MIN_YES,
+              myVote: me ? cityStore.myVote(me) ?? "" : "",
+            }
+          : null,
+      lastResult:
+        last && lastDef
+          ? {
+              facilityId: last.facilityId,
+              name: lastDef.name,
+              icon: lastDef.icon,
+              passed: last.passed,
+              yes: last.yes,
+              no: last.no,
+            }
+          : null,
+      facilities: cityStore.builtIds(),
+    };
+  }
+
+  /**
+   * Evaluasi penutupan voting ±1 detik sekali dari loop simulasi: bila
+   * ada usulan yang ditutup, sinkronkan fasilitas baru ke state dan
+   * kabari semua pemain (toast peristiwa besar + segarkan panel kota).
+   */
+  private updateCity(now: number) {
+    if (now - this.lastCityTickAt < 1000) return;
+    this.lastCityTickAt = now;
+    const closed = cityStore.evaluateClosing();
+    if (!closed) return;
+    this.syncCityState();
+    const def = FACILITY_BY_ID.get(closed.facilityId);
+    this.broadcast("city_event", {
+      message: closed.passed
+        ? `🎉 Voting selesai: ${def?.icon ?? ""} ${def?.name ?? "Fasilitas"} LOLOS (setuju ${closed.yes} · tolak ${closed.no}) — fasilitasnya sudah berdiri di kota!`
+        : `🗳️ Voting selesai: ${def?.icon ?? ""} ${def?.name ?? "Fasilitas"} belum lolos (setuju ${closed.yes} · tolak ${closed.no}). Usulan masuk antrean lagi.`,
+    });
+    this.broadcast("news_update", {});
   }
 
   // ---------- Ekonomi (Tahap 5 + 6B) ----------
@@ -1261,5 +1410,7 @@ export class KotaRoom extends Room<KotaState> {
     // Kebutuhan hidup berkurang hanya selama bermain + jam dunia server (Tahap 6B).
     this.updateNeeds(dt, now);
     this.updateWorldTime();
+    // Kota Hidup (Tahap 8): nilai penutupan voting berkala.
+    this.updateCity(now);
   }
 }
