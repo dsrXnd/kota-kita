@@ -369,10 +369,10 @@ const tokenW = await register(userW);
   for (const p of TAMAN_POINTS) await driveTo(room, p);
   const done = await doneP;
   if (!done) fail("Sif taman tidak selesai setelah 6 titik");
-  if ((await balanceOf(tokenT)) !== 670) fail(`Saldo taman harusnya 670, terbaca ${await balanceOf(tokenT)}`);
+  if ((await balanceOf(tokenT)) !== 675) fail(`Saldo taman harusnya 675, terbaca ${await balanceOf(tokenT)}`);
   await wait(1500);
-  if ((await balanceOf(tokenT)) !== 670) fail("Gaji taman dibayar lebih dari sekali");
-  console.log("✅ Petugas Taman: 6 titik disiram — gaji 170 KC tepat sekali (500 → 670)");
+  if ((await balanceOf(tokenT)) !== 675) fail("Gaji taman dibayar lebih dari sekali");
+  console.log("✅ Petugas Taman: 6 titik disiram — gaji 170 KC tepat sekali (500 → 675, termasuk quest Kerja Keras +5 dari Tahap 9)");
   await room.leave();
 }
 
@@ -384,8 +384,8 @@ const tokenW = await register(userW);
   const r = await startJob(room, "ojek");
   if (!r?.ok) fail(`Mulai ojek gagal: ${JSON.stringify(r)}`);
   await completeDelivery(room, track, 220);
-  if ((await balanceOf(tokenO)) !== 720) fail(`Saldo ojek harusnya 720, terbaca ${await balanceOf(tokenO)}`);
-  console.log("✅ Ojek Makanan: ambil & antar selesai — gaji 220 KC (500 → 720)");
+  if ((await balanceOf(tokenO)) !== 725) fail(`Saldo ojek harusnya 725, terbaca ${await balanceOf(tokenO)}`);
+  console.log("✅ Ojek Makanan: ambil & antar selesai — gaji 220 KC (500 → 725, termasuk quest Kerja Keras +5 dari Tahap 9)");
   await room.leave();
 }
 
@@ -403,7 +403,7 @@ const tokenW = await register(userW);
   r = await startJob(room, "kurir");
   if (!r?.ok) fail(`Mulai kurir gagal: ${JSON.stringify(r)}`);
   await completeDelivery(room, track, 200);
-  if ((await balanceOf(tokenP)) !== 850) fail(`Saldo P harusnya 850, terbaca ${await balanceOf(tokenP)}`);
+  if ((await balanceOf(tokenP)) !== 855) fail(`Saldo P harusnya 855, terbaca ${await balanceOf(tokenP)}`);
   const jobs = await getJobs(room);
   const cdPenjaga = jobs.jobs.find((j) => j.id === "penjaga_warung")?.cooldownRemainingMs ?? 0;
   const cdKurir = jobs.jobs.find((j) => j.id === "kurir")?.cooldownRemainingMs ?? 0;
@@ -661,10 +661,10 @@ await waitServerUp();
   const doneP = waitForEarned(room, 150, 120000);
   await driveTo(room, WARKOP_FRONT);
   if (!(await doneP)) fail("Sif penjaga (skip suite) tidak selesai");
-  if ((await balanceOf(tokenW)) !== 20150) fail(`Saldo W harusnya 20150, terbaca ${await balanceOf(tokenW)}`);
+  if ((await balanceOf(tokenW)) !== 20155) fail(`Saldo W harusnya 20155, terbaca ${await balanceOf(tokenW)}`);
   s = await skip("penjaga_warung");
   if (!s?.ok) fail(`Skip penjaga gagal: ${JSON.stringify(s)}`);
-  if ((await balanceOf(tokenW)) !== 20090) fail(`Skip penjaga harusnya −60 KC → 20090, terbaca ${await balanceOf(tokenW)}`);
+  if ((await balanceOf(tokenW)) !== 20095) fail(`Skip penjaga harusnya −60 KC → 20095, terbaca ${await balanceOf(tokenW)}`);
   jobs = await getJobs(room);
   if (jobs.skipAttemptsLeft !== 2) fail(`Attempt setelah skip harusnya 2, terbaca ${jobs.skipAttemptsLeft}`);
   const cdAfterSkip = jobs.jobs.find((j) => j.id === "penjaga_warung")?.cooldownRemainingMs ?? -1;
@@ -676,7 +676,7 @@ await waitServerUp();
   if (!r?.ok) fail(`Mulai penjaga pasca-skip gagal: ${JSON.stringify(r)}`);
   room.send("job_cancel", { jobId: "penjaga_warung" });
   await wait(400);
-  if ((await balanceOf(tokenW)) !== 20090) fail(`Biaya skip harusnya HANGUS setelah batal, saldo terbaca ${await balanceOf(tokenW)}`);
+  if ((await balanceOf(tokenW)) !== 20095) fail(`Biaya skip harusnya HANGUS setelah batal, saldo terbaca ${await balanceOf(tokenW)}`);
   console.log("✅ Sif hasil skip dibatalkan → biaya 60 KC tetap hangus (tidak kembali)");
 
   // D5. Kebersihan selesai → skip −80 KC (attempt 2 → 1).
@@ -687,7 +687,7 @@ await waitServerUp();
   if (!(await doneK)) fail("Sif kebersihan (skip suite) tidak selesai");
   s = await skip("kebersihan");
   if (!s?.ok) fail(`Skip kebersihan gagal: ${JSON.stringify(s)}`);
-  if ((await balanceOf(tokenW)) !== 20190) fail(`Saldo setelah skip kebersihan harusnya 20190, terbaca ${await balanceOf(tokenW)}`);
+  if ((await balanceOf(tokenW)) !== 20195) fail(`Saldo setelah skip kebersihan harusnya 20195, terbaca ${await balanceOf(tokenW)}`);
 
   // D6. Taman selesai → skip −70 KC (attempt 1 → 0).
   r = await startJob(room, "taman");
@@ -699,7 +699,7 @@ await waitServerUp();
   if (!s?.ok) fail(`Skip taman gagal: ${JSON.stringify(s)}`);
   jobs = await getJobs(room);
   if (jobs.skipAttemptsLeft !== 0) fail(`Attempt setelah 3x skip harusnya 0, terbaca ${jobs.skipAttemptsLeft}`);
-  if ((await balanceOf(tokenW)) !== 20290) fail(`Saldo setelah skip taman harusnya 20290, terbaca ${await balanceOf(tokenW)}`);
+  if ((await balanceOf(tokenW)) !== 20295) fail(`Saldo setelah skip taman harusnya 20295, terbaca ${await balanceOf(tokenW)}`);
   console.log("✅ Skip Kebersihan −80 KC & Taman −70 KC — attempt bersama habis (0 tersisa)");
 
   // D7. Taman selesai lagi (sedang cooldown) → skip ke-4 DITOLAK (attempt habis).
@@ -759,9 +759,9 @@ const tokenM = await register(userM);
   await driveTo(room, SATPAM_SPOT);
   const done = await doneP;
   if (!done) fail("Sif satpam tidak selesai setelah 60 detik jaga");
-  if ((await balanceOf(tokenM)) !== 750) fail(`Saldo satpam harusnya 750, terbaca ${await balanceOf(tokenM)}`);
+  if ((await balanceOf(tokenM)) !== 755) fail(`Saldo satpam harusnya 755, terbaca ${await balanceOf(tokenM)}`);
   await wait(1500);
-  if ((await balanceOf(tokenM)) !== 750) fail("Gaji satpam dibayar lebih dari sekali");
+  if ((await balanceOf(tokenM)) !== 755) fail("Gaji satpam dibayar lebih dari sekali");
   const jobs = await getJobs(room);
   const cdSatpam = jobs.jobs.find((j) => j.id === "satpam")?.cooldownRemainingMs ?? 0;
   if (!(cdSatpam > 140 * 60000 && cdSatpam <= 150 * 60000)) {

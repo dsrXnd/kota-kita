@@ -6,9 +6,10 @@
 //     menggantikan bonus rata +100 KC); klaim kedua di hari yang sama ditolak.
 //  3. Tamu ditolak untuk bonus_claim dan job_start.
 //  4. Pekerjaan kebersihan diselesaikan dengan BERJALAN ke 5 titik (input gerak,
-//     bukan teleport) -> gaji 180 KC dibayar TEPAT sekali (510 -> 690).
+//     bukan teleport) -> gaji 180 KC dibayar TEPAT sekali (510 -> 695:
+//     gaji 180 + hadiah quest harian Kerja Keras +5 KC dari Tahap 9).
 //  5. Mulai pekerjaan yang sama saat cooldown ditolak server.
-//  6. Setelah putus & masuk lagi, saldo 690 tetap persisten.
+//  6. Setelah putus & masuk lagi, saldo 695 tetap persisten.
 import { Client } from "colyseus.js";
 
 const HTTP = process.env.KOTA_HTTP || "http://localhost:2567";
@@ -148,14 +149,14 @@ for (const point of CLEANUP_POINTS) {
 const done = await donePromise;
 if (!done || done.earned !== 180) fail(`Penyelesaian sif salah: ${JSON.stringify(done)}`);
 const me3 = await api("/auth/me", null, token);
-if (me3.data.balance !== 690) fail(`Saldo setelah gaji harusnya 690, terbaca ${me3.data.balance}`);
-console.log("✅ 5 titik dikunjungi — gaji 180 KC dibayar (510 → 690)");
+if (me3.data.balance !== 695) fail(`Saldo setelah gaji harusnya 695, terbaca ${me3.data.balance}`);
+console.log("✅ 5 titik dikunjungi — gaji 180 KC + quest Kerja Keras 5 KC dibayar (510 → 695)");
 
 // Dibayar tepat sekali: tunggu sebentar, saldo tidak boleh berubah lagi.
 await wait(2000);
 const me4 = await api("/auth/me", null, token);
-if (me4.data.balance !== 690) fail(`Saldo berubah lagi setelah sif selesai (${me4.data.balance}) — gaji dobel?`);
-console.log("✅ Gaji dibayar tepat sekali (saldo stabil di 690 KC)");
+if (me4.data.balance !== 695) fail(`Saldo berubah lagi setelah sif selesai (${me4.data.balance}) — gaji dobel?`);
+console.log("✅ Gaji dibayar tepat sekali (saldo stabil di 695 KC)");
 
 // 5. Cooldown: mulai pekerjaan yang sama lagi harus ditolak.
 const cdPromise = nextMessage(room, "job_result");
@@ -169,16 +170,16 @@ await room.leave();
 const login = await api("/auth/login", { username: user, password: PASS });
 if (!login.data.token) fail("Login ulang gagal");
 const me5 = await api("/auth/me", null, login.data.token);
-if (me5.data.balance !== 690) fail(`Saldo setelah login ulang harusnya 690, terbaca ${me5.data.balance}`);
+if (me5.data.balance !== 695) fail(`Saldo setelah login ulang harusnya 695, terbaca ${me5.data.balance}`);
 const client2 = new Client(WS);
 const room2 = await client2.joinOrCreate("kota", { name: "UjiEko", token: login.data.token });
 const jobs2Promise = nextMessage(room2, "jobs");
 room2.send("jobs_get", {});
 const jobs2 = await jobs2Promise;
-if (!jobs2 || jobs2.balance !== 690) fail(`Saldo di sesi baru = ${jobs2?.balance}, harusnya 690`);
+if (!jobs2 || jobs2.balance !== 695) fail(`Saldo di sesi baru = ${jobs2?.balance}, harusnya 695`);
 if (jobs2.bonusAvailable) fail("Check-in harusnya sudah tidak tersedia (sudah diklaim hari ini)");
 await room2.leave();
-console.log("✅ Saldo 690 KC persisten setelah keluar & masuk lagi; status check-in ikut tersimpan");
+console.log("✅ Saldo 695 KC persisten setelah keluar & masuk lagi; status check-in ikut tersimpan");
 
 console.log("🎉 SEMUA UJI EKONOMI LULUS — saldo awal, check-in streak Hari 1 (+10 KC), gaji pekerjaan, cooldown per-pekerjaan, anti-tamu, persistensi.");
 process.exit(0);
