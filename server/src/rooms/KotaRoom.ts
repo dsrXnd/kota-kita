@@ -5,6 +5,7 @@ import { resolveCollisions } from "./colliders";
 import { accounts, type ProfileData } from "../accounts/store";
 import {
   JOBS,
+  JOB_CHANGE_FEE,
   MAX_ACTIVE_SHIFTS,
   NEEDS_DECAY_PER_SEC,
   NEEDS_WARN_AT,
@@ -415,12 +416,51 @@ export class KotaRoom extends Room<KotaState> {
       if (result.ok) client.send("balance", { balance: result.balance });
     });
 
+    // --- Pilihan pekerjaan (Tahap 10) ---
+    // Tiap akun memilih TEPAT 2 pekerjaan sebagai "pekerjaannya"; pilihan
+    // pertama gratis, ganti pilihan membakar 500 KC (aturan & validasi di
+    // AccountStore.chooseJobs). Tidak boleh saat ada sif berjalan.
+    this.onMessage("job_choose", (client, data: { jobIds?: unknown }) => {
+      const reject = (message: string) => client.send("job_choose_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Pilihan pekerjaan hanya untuk pemain yang masuk dengan akun — tamu tidak bekerja.");
+      const mine = this.shifts.get(client.sessionId);
+      if (mine && mine.size > 0) {
+        return reject("Kamu sedang menjalankan sif — selesaikan atau batalkan dulu sebelum memilih/mengganti pekerjaan.");
+      }
+      const result = accounts.chooseJobs(me, data?.jobIds);
+      if (!result.ok) return reject(result.error ?? "Pilihan pekerjaan tidak sah.");
+      const names = (accounts.getEconomy(me)?.chosenJobs ?? []).map((id) => JOBS[id]?.name ?? id).join(" & ");
+      client.send("job_choose_result", {
+        ok: true,
+        charged: result.charged,
+        message:
+          result.charged > 0
+            ? `Pilihan pekerjaan diganti! −${result.charged} KC (terbakar). Pekerjaanmu sekarang: ${names}.`
+            : `Pilihan pekerjaan tersimpan — gratis! Pekerjaanmu: ${names}. Selamat bekerja! 💼`,
+      });
+      client.send("balance", { balance: result.balance });
+      client.send("jobs", this.jobsPayload(client.sessionId));
+    });
+
     this.onMessage("job_start", (client, data: { jobId?: unknown }) => {
       const reject = (message: string) => client.send("job_result", { ok: false, message });
       const me = this.sessionAccount.get(client.sessionId);
       if (!me) return reject("Masuk dengan akun dulu untuk bekerja — tamu tidak bisa menerima gaji.");
       const def = typeof data?.jobId === "string" ? JOBS[data.jobId] : undefined;
       if (!def) return reject("Pekerjaan tidak dikenal.");
+      // Gerbang pilihan pekerjaan (Tahap 10): hanya 2 pekerjaan pilihan
+      // akun yang boleh diambil. Cooldown TIDAK diperiksa di sini — urutan
+      // pemeriksaan di bawah tetap sama seperti sebelumnya.
+      const chosenJobs = accounts.getEconomy(me)?.chosenJobs ?? [];
+      if (chosenJobs.length === 0) {
+        return reject("Pilih dulu 2 pekerjaanmu di panel Pekerjaan 💼 — setiap warga hanya mengambil 2 pekerjaan pilihannya.");
+      }
+      if (!chosenJobs.includes(def.id)) {
+        return reject(
+          `Pekerjaan ini bukan pilihanmu — "${def.name}" tidak termasuk 2 pekerjaan pilihanmu. Ganti pilihan lewat panel Pekerjaan (${JOB_CHANGE_FEE} KC).`
+        );
+      }
       // Efek kritis kebutuhan (Tahap 6B): meter kosong = tidak bisa mulai sif.
       if (this.needsCritical(client.sessionId)) {
         return reject("Kebutuhanmu kritis (ada meter yang kosong) — makan/minum/ke WC dulu ya, baru bisa mulai sif. Ada jalur gratis kok!");
@@ -1298,8 +1338,47 @@ export class KotaRoom extends Room<KotaState> {
     return `Ambil dulu di ${shift.pickup?.name ?? "titik ambil"}.`;
   }
 
+  /**
+   * Tujuan sif saat ini untuk panah penunjuk client (Tahap 10) — dihitung
+   * dari keadaan otoritatif yang sama dengan yang dinilai loop simulasi:
+   * pos jaga untuk "stay", titik belum-dikunjungi TERDEKAT untuk "visit",
+   * titik ambil lalu tujuan antar untuk "deliver".
+   */
+  private shiftObjective(sessionId: string, shift: ShiftState): { x: number; z: number; label: string } {
+    const def = JOBS[shift.jobId];
+    if (def.kind === "stay" && def.post) {
+      return {
+        x: def.post.x,
+        z: def.post.z,
+        label: def.id === "satpam" ? "Pos jaga: Teras Balai Kota" : "Pos jaga: Depan Warung Kopi",
+      };
+    }
+    if (def.kind === "visit" && def.points) {
+      const player = this.state.players.get(sessionId);
+      let best: { x: number; z: number } = def.points[0];
+      let bestDist = Infinity;
+      def.points.forEach((p, i) => {
+        if (shift.visited[i]) return;
+        const d = player ? Math.hypot(player.x - p.x, player.z - p.z) : 0;
+        if (d < bestDist) {
+          bestDist = d;
+          best = p;
+        }
+      });
+      const noun = def.id === "taman" ? "Titik tanaman" : "Titik bersih-bersih";
+      return { x: best.x, z: best.z, label: `${noun} ${shift.visited.filter(Boolean).length + 1}/${def.points.length}` };
+    }
+    if (shift.phase === "pickup" && shift.pickup) {
+      return { x: shift.pickup.x, z: shift.pickup.z, label: `Ambil: ${shift.pickup.name}` };
+    }
+    if (shift.target) {
+      return { x: shift.target.x, z: shift.target.z, label: `Antar: ${shift.target.name}` };
+    }
+    return { x: 0, z: 0, label: def.name };
+  }
+
   /** Ringkasan satu sif untuk ditampilkan client (bukan data otoritatif — server tetap yang menilai). */
-  private shiftSnapshot(shift: ShiftState) {
+  private shiftSnapshot(sessionId: string, shift: ShiftState) {
     const def = JOBS[shift.jobId];
     return {
       jobId: def.id,
@@ -1318,6 +1397,7 @@ export class KotaRoom extends Room<KotaState> {
       targetX: shift.target?.x ?? 0,
       targetZ: shift.target?.z ?? 0,
       deadline: shift.deadline,
+      objective: this.shiftObjective(sessionId, shift),
     };
   }
 
@@ -1325,7 +1405,7 @@ export class KotaRoom extends Room<KotaState> {
   private shiftSnapshots(sessionId: string) {
     const mine = this.shifts.get(sessionId);
     if (!mine) return [];
-    return [...mine.values()].map((s) => this.shiftSnapshot(s));
+    return [...mine.values()].map((s) => this.shiftSnapshot(sessionId, s));
   }
 
   /** Data panel pekerjaan untuk satu sesi: saldo, check-in streak, daftar pekerjaan + cooldown + skip, sif aktif. */
@@ -1343,6 +1423,12 @@ export class KotaRoom extends Room<KotaState> {
       streakCount: checkIn?.currentStreak ?? 0,
       skipAttemptsLeft: skip.left,
       isNight: isWorldNight(),
+      // Pilihan pekerjaan (Tahap 10): 2 pekerjaan milik akun ini, apakah
+      // masih harus memilih, biaya ganti pilihan, dan statistik per akun.
+      chosenJobs: eco ? [...(eco.chosenJobs ?? [])] : [],
+      needsChoice: !!me && (eco?.chosenJobs ?? []).length === 0,
+      changeFee: JOB_CHANGE_FEE,
+      jobStats: eco ? eco.jobStats ?? {} : {},
       jobs: Object.values(JOBS).map((def) => ({
         id: def.id,
         name: def.name,
@@ -1375,10 +1461,20 @@ export class KotaRoom extends Room<KotaState> {
     const client = this.clients.find((c) => c.sessionId === sessionId);
     if (!me || !client) return;
     const balance = accounts.completeJob(me, def.id, def.pay, def.name);
+    // Statistik pekerjaan per akun (Tahap 10): done +1, earned += gaji ini saja.
+    accounts.recordJobDone(me, def.id, def.pay);
     client.send("job_update", {
       actives: this.shiftSnapshots(sessionId),
       earned: def.pay,
       message: `Sif "${def.name}" selesai! +${def.pay} KC 🎉`,
+    });
+    // Kartu hasil khusus (Tahap 10): client menampilkannya besar + reaksi avatar.
+    client.send("job_done", {
+      jobId: def.id,
+      name: def.name,
+      pay: def.pay,
+      cooldownMs: def.cooldownMs,
+      balance,
     });
     client.send("balance", { balance });
     // Quest Kerja Keras (Tahap 9): sif selesai pertama hari ini membayar
@@ -1451,10 +1547,17 @@ export class KotaRoom extends Room<KotaState> {
             mine.delete(def.id);
             if (mine.size === 0) this.shifts.delete(sessionId);
           }
+          // Statistik pekerjaan per akun (Tahap 10): antar kelewat waktu = GAGAL.
+          const me = this.sessionAccount.get(sessionId);
+          if (me) accounts.recordJobFailed(me, def.id);
           const client = this.clients.find((c) => c.sessionId === sessionId);
-          client?.send("job_update", {
-            actives: this.shiftSnapshots(sessionId),
-            message: "Waktu antar habis — sif gagal, tidak ada gaji. Coba lagi kapan-kapan!",
+          // job_update tanpa pesan: pemberitahuan gagal disampaikan SEKALI
+          // lewat job_failed (kartu hasil client, Tahap 10).
+          client?.send("job_update", { actives: this.shiftSnapshots(sessionId) });
+          client?.send("job_failed", {
+            jobId: def.id,
+            name: def.name,
+            reason: "Waktu antar habis — paket tidak sampai tepat waktu.",
           });
           return;
         }
