@@ -54,13 +54,13 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
 - [ ] Uji: buka alamat Pages dari HP → tersambung ke server uji (Codespaces) → bisa masuk & bermain
 
 **Ekonomi dasar — Koin Kota (KC):**
-- [ ] Setiap akun punya **saldo KC** yang disimpan server (otoritatif: semua perubahan saldo terjadi & divalidasi di server, client hanya menampilkan) + catatan mutasi sederhana di data akun
-- [ ] Saldo awal untuk akun baru + **bonus masuk harian** (klaim sekali per hari saat login)
-- [ ] HUD menampilkan saldo; mode Tamu tidak punya saldo (harus daftar — mendorong registrasi, pola yang terbukti di game referensi)
+- [x] Setiap akun punya **saldo KC** yang disimpan server (otoritatif: semua perubahan saldo terjadi & divalidasi di server, client hanya menampilkan) + catatan mutasi sederhana di data akun
+- [x] Saldo awal untuk akun baru + **bonus masuk harian** (klaim sekali per hari saat login)
+- [x] HUD menampilkan saldo; mode Tamu tidak punya saldo (harus daftar — mendorong registrasi, pola yang terbukti di game referensi)
 
 **Pekerjaan sesi (disesuaikan untuk real-time, bukan sekadar timer pasif):**
-- [ ] 3 pekerjaan pertama yang terikat tempat: **Penjaga Warung Kopi**, **Petugas Kebersihan Plaza**, **Kurir Paket Balai Kota** — mulai sif di lokasi, selesaikan aktivitas singkat di dunia (berdiri di pos / jangkau titik-titik tugas), terima gaji KC dari server
-- [ ] Jeda antar-sif (cooldown) divalidasi server berdasarkan waktu & posisi — tidak bisa diakali dari client
+- [x] 3 pekerjaan pertama yang terikat tempat: **Penjaga Warung Kopi**, **Petugas Kebersihan Plaza**, **Kurir Paket Balai Kota** — mulai sif di lokasi, selesaikan aktivitas singkat di dunia (berdiri di pos / jangkau titik-titik tugas), terima gaji KC dari server
+- [x] Jeda antar-sif (cooldown) divalidasi server berdasarkan waktu & posisi — tidak bisa diakali dari client
 
 **Selesai bila:** uji otomatis ekonomi LULUS — saldo bertambah dari gaji & bonus, saldo tetap ada setelah keluar-masuk lagi, sif ganda saat cooldown ditolak server, tamu tidak bisa menerima gaji — dan client dari alamat Pages bisa bermain melawan server uji.
 
