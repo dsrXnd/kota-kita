@@ -1,6 +1,13 @@
 import * as THREE from "three";
 import "./style.css";
 import { Plaza, resolveCollisions, type Interactable } from "./world/Plaza";
+import {
+  Kampung,
+  PLOT_BY_ID,
+  PLOT_PRICE,
+  HOUSE_NAME,
+  HOUSE_PRICE,
+} from "./world/Kampung";
 import { Avatar } from "./avatar/Avatar";
 import { ThirdPersonCamera } from "./camera/ThirdPersonCamera";
 import { Joystick } from "./controls/Joystick";
@@ -14,7 +21,7 @@ import {
   savedUsername,
   clearSession,
 } from "./multiplayer/Account";
-import { HUD, type AuthIntent, type NearbyPlayer } from "./interface/HUD";
+import { HUD, type AuthIntent, type NearbyPlayer, type PlotView } from "./interface/HUD";
 import { SoundEngine } from "./interface/Sound";
 
 // Konstanta gerak — HARUS sama dengan server (server/src/rooms/KotaRoom.ts),
@@ -23,7 +30,11 @@ const WALK_SPEED = 4;
 const RUN_SPEED = 7;
 const GRAVITY = 22;
 const JUMP_VELOCITY = 8.2;
-const WORLD_BOUND = 42;
+// Batas dunia persegi panjang — HARUS sama dengan server (KotaRoom.ts).
+const BOUND_MIN_X = -42;
+const BOUND_MAX_X = 136;
+const BOUND_MIN_Z = -42;
+const BOUND_MAX_Z = 42;
 const FOUNTAIN_RADIUS = 3.6;
 
 // ---------- Renderer & scene ----------
@@ -40,6 +51,9 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 300);
 
 const plaza = new Plaza(scene);
+const kampung = new Kampung();
+scene.add(kampung.group);
+const allInteractables: Interactable[] = [...plaza.interactables, ...kampung.interactables];
 const tpCam = new ThirdPersonCamera();
 
 // ---------- Kontrol ----------
@@ -128,6 +142,8 @@ function persistBlocked() {
 let accountName: string | null = null;
 
 let currentInteract: Interactable | null = null;
+// Kavling yang panelnya sedang terbuka (Tahap 6).
+let openPlotId: string | null = null;
 
 // ---------- HUD ----------
 const hud = new HUD({
@@ -156,7 +172,14 @@ const hud = new HUD({
     hud.toast(muted ? "Suara dimatikan 🔇" : "Suara dinyalakan 🔊");
   },
   onInteract: () => {
-    if (currentInteract) hud.showCard(currentInteract.label, currentInteract.description);
+    if (!currentInteract) return;
+    // Kavling Kampung Kita membuka panel kavling (klaim/bangun), bukan kartu info biasa.
+    if (currentInteract.id.startsWith("plot:")) {
+      openPlotId = currentInteract.id.slice("plot:".length);
+      hud.showPlot(buildPlotView(openPlotId));
+    } else {
+      hud.showCard(currentInteract.label, currentInteract.description);
+    }
   },
   onPhoto: () => takePhoto(),
   onDayNight: (night) => {
@@ -213,6 +236,19 @@ const hud = new HUD({
   onCancelJob: () => {
     network.cancelJob();
   },
+  onHome: () => {
+    if (!network.connected) {
+      hud.toast("Sedang offline — fitur Ke Rumahku butuh koneksi ke server.");
+      return;
+    }
+    network.goHome();
+  },
+  onClaimPlot: (plotId) => {
+    network.claimPlot(plotId);
+  },
+  onBuildHouse: (tier) => {
+    network.buildHouse(tier);
+  },
 });
 
 network.onChat = (msg) => {
@@ -250,6 +286,71 @@ network.onJobUpdate = (update) => {
     hud.toast(update.message, 3200);
   }
 };
+
+// Perumahan (Tahap 6): hasil perintah kavling dari server + teleport pulang.
+network.onPlotResult = (result) => {
+  hud.toast(result.message, 3800);
+  if (result.ok) sound.click();
+  // Segarkan tampilan distrik & panel dari state terbaru.
+  kampung.sync(network.plots as any);
+  if (openPlotId && hud.plotPanelOpen) hud.showPlot(buildPlotView(openPlotId));
+};
+network.onHomeResult = (result) => {
+  hud.toast(result.message, 3400);
+  if (result.ok) {
+    // Jepret posisi lokal ke posisi resmi server (teleport, bukan lerp pelan).
+    const self = network.players?.get(network.sessionId);
+    if (self) {
+      selfPos.set(Number(self.x) || 0, 0, Number(self.z) || 0);
+      selfVy = 0;
+      tpCam.snapBehind(selfPos);
+    }
+    sound.click();
+  }
+};
+
+/** Susun tampilan panel kavling dari state server + denah lokal (harga memang konstanta bersama). */
+function buildPlotView(plotId: string): PlotView {
+  const def = PLOT_BY_ID.get(plotId);
+  const state = network.plots?.get(plotId);
+  const owner = state?.owner ?? "";
+  const house = state?.house ?? 0;
+  const guest = !accountName;
+  const meLower = (accountName ?? "").toLowerCase();
+  const isMine = !!owner && owner.toLowerCase() === meLower;
+  // Kavling milikku (untuk aturan satu akun satu kavling).
+  let myPlotId: string | null = null;
+  network.plots?.forEach((p: any, id: string) => {
+    if (p?.owner && String(p.owner).toLowerCase() === meLower) myPlotId = id;
+  });
+  const canClaim = !owner && !guest && !myPlotId && network.connected;
+  let note = "";
+  if (!network.connected) note = "Sedang offline — klaim & bangun rumah butuh koneksi ke server.";
+  else if (guest && !owner) note = "Kamu masuk sebagai tamu. Daftar akun untuk mengumpulkan KC & klaim kavling.";
+  else if (!owner && myPlotId) note = "Kamu sudah punya kavling — satu akun hanya boleh satu kavling.";
+  else if (isMine) note = "Ini kavlingmu. Bangun atau tingkatkan rumahmu di sini!";
+  return {
+    plotId,
+    title: `Kavling ${def?.tier ?? "?"} · No. ${def?.number ?? "?"}`,
+    tierLabel: def?.tier === 2 ? "Kavling 2 (premium, tepi jalan utama)" : "Kavling 1 (standar)",
+    price: def ? PLOT_PRICE[def.tier] : 0,
+    owner,
+    houseName: house > 0 ? HOUSE_NAME[house] : "",
+    isMine,
+    canClaim,
+    note,
+    tiers: [1, 2, 3]
+      .filter((t) => t >= Math.max(house, 1))
+      .map((t) => ({
+        tier: t,
+        name: HOUSE_NAME[t],
+        cost: HOUSE_PRICE[t] - HOUSE_PRICE[house],
+        isUpgrade: house > 0,
+        current: house === t,
+        locked: t === 3 && def?.tier === 1,
+      })),
+  };
+}
 
 function refreshNearby() {
   const players = network.players;
@@ -377,8 +478,8 @@ function stepLocalPhysics(dt: number) {
     }
   }
 
-  selfPos.x = THREE.MathUtils.clamp(selfPos.x, -WORLD_BOUND, WORLD_BOUND);
-  selfPos.z = THREE.MathUtils.clamp(selfPos.z, -WORLD_BOUND, WORLD_BOUND);
+  selfPos.x = THREE.MathUtils.clamp(selfPos.x, BOUND_MIN_X, BOUND_MAX_X);
+  selfPos.z = THREE.MathUtils.clamp(selfPos.z, BOUND_MIN_Z, BOUND_MAX_Z);
   const dF = Math.hypot(selfPos.x, selfPos.z);
   if (dF < FOUNTAIN_RADIUS && dF > 0.0001) {
     const push = FOUNTAIN_RADIUS / dF;
@@ -386,8 +487,8 @@ function stepLocalPhysics(dt: number) {
     selfPos.z *= push;
   }
 
-  // Tabrakan bangunan (sama seperti server).
-  resolveCollisions(selfPos);
+  // Tabrakan bangunan (sama seperti server) + rumah pemain yang berdiri (Tahap 6).
+  resolveCollisions(selfPos, kampung.houseColliders());
 
   // Suara langkah kaki mengikuti jarak tempuh di tanah.
   if (moving && selfPos.y <= 0) {
@@ -510,7 +611,7 @@ function checkInteract(dt: number) {
   interactTimer = 0;
   let nearest: Interactable | null = null;
   let best = Infinity;
-  for (const it of plaza.interactables) {
+  for (const it of allInteractables) {
     const d = Math.hypot(selfPos.x - it.position.x, selfPos.z - it.position.z);
     if (d < it.radius && d < best) {
       best = d;
@@ -577,6 +678,11 @@ renderer.setAnimationLoop(() => {
       countTimer = 0;
       hud.setPlayerCount(network.connected ? network.playerCount : 1);
       refreshNearby();
+      // Kampung Kita: terapkan state kavling terbaru dari server (pemilik & rumah).
+      if (network.connected) {
+        kampung.sync(network.plots as any);
+        if (openPlotId && hud.plotPanelOpen) hud.showPlot(buildPlotView(openPlotId));
+      }
     }
   }
 
