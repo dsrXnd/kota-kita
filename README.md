@@ -1,13 +1,15 @@
 # 🏙️ KOTA KITA
 
 Dunia virtual sosial 3D multiplayer berbasis browser, bertema kota Indonesia modern.
-Prototype Tahap 1: satu Plaza Utama, avatar bisa dikustomisasi warnanya, kontrol sentuh Android, multiplayer real-time, chat, emote, mode foto, dan siang/malam.
+Sudah berjalan: satu Plaza Utama, avatar bisa dikustomisasi (warna, gaya rambut/penutup kepala, baju batik), kontrol sentuh Android, multiplayer real-time, chat, emote, mode foto, siang/malam, akun persisten + teman + moderasi (Tahap 3), paket deploy satu alamat (Tahap 4), dan **ekonomi Koin Kota (KC)** — saldo akun, bonus harian, dan 3 pekerjaan dalam dunia (Tahap 5).
 
 Dokumen desain ada di folder `docs/`:
 - `game-design.md` — Game Design Document
 - `art-style.md` — konsep visual & peta area
 - `architecture.md` — arsitektur teknis & keputusan
 - `avatar-design.md` — desain avatar
+- `accounts.md` — sistem akun, teman & moderasi (Tahap 3)
+- `economy.md` — ekonomi Koin Kota: aturan KC, 3 pekerjaan, validasi anti-cheat server (Tahap 5)
 - `roadmap.md` — rencana tahap berikutnya
 
 ## Struktur
@@ -72,6 +74,12 @@ Uji beban 50 pemain: server menyala, lalu `cd server && npm run test:load`.
   ```
   Membuktikan daftar/masuk (sandi salah ditolak), profil persisten, join bertoken, teman + status online, dan laporan moderasi tertulis di server. Detail sistem akun: `docs/accounts.md`.
   Data runtime server (akun, log, laporan) tersimpan di `server/data/` dan tidak masuk repo.
+- **Otomatis (ekonomi Tahap 5):**
+  ```bash
+  cd server
+  npm run test:economy
+  ```
+  Membuktikan saldo awal 500 KC, bonus harian +100 KC (klaim kedua di hari yang sama ditolak), tamu ditolak bonus & pekerjaan, gaji 180 KC dari pekerjaan kebersihan dibayar tepat sekali, cooldown 10 menit ditegakkan server, dan saldo persisten setelah masuk lagi. Detail ekonomi: `docs/economy.md`.
 - **Manual:** buka game di dua perangkat/tab berbeda, masuk dengan nama berbeda, bergerak & chat — avatar harus terlihat bergerak di layar satu sama lain.
 - **Build produksi:** `cd client && npm run build` dan `cd server && npm run build` harus selesai tanpa error.
 
