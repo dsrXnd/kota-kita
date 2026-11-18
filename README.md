@@ -1,7 +1,7 @@
 # 🏙️ KOTA KITA
 
 Dunia virtual sosial 3D multiplayer berbasis browser, bertema kota Indonesia modern.
-Sudah berjalan: satu Plaza Utama, avatar bisa dikustomisasi (warna, gaya rambut/penutup kepala, baju batik), kontrol sentuh Android, multiplayer real-time, chat, emote, mode foto, siang/malam, akun persisten + teman + moderasi (Tahap 3), paket deploy satu alamat (Tahap 4), dan **ekonomi Koin Kota (KC)** — saldo akun, bonus harian, dan 3 pekerjaan dalam dunia (Tahap 5).
+Sudah berjalan: satu Plaza Utama, avatar bisa dikustomisasi (warna, gaya rambut/penutup kepala, baju batik), kontrol sentuh Android, multiplayer real-time, chat, emote, mode foto, siang/malam, akun persisten + teman + moderasi (Tahap 3), paket deploy satu alamat (Tahap 4), **ekonomi Koin Kota (KC)** — saldo akun, bonus harian, dan 3 pekerjaan dalam dunia (Tahap 5), dan **Kampung Kita** — 24 kavling yang bisa diklaim dengan KC serta katalog 3 rumah pribadi yang tersinkron ke semua pemain (Tahap 6).
 
 Dokumen desain ada di folder `docs/`:
 - `game-design.md` — Game Design Document
@@ -10,6 +10,7 @@ Dokumen desain ada di folder `docs/`:
 - `avatar-design.md` — desain avatar
 - `accounts.md` — sistem akun, teman & moderasi (Tahap 3)
 - `economy.md` — ekonomi Koin Kota: aturan KC, 3 pekerjaan, validasi anti-cheat server (Tahap 5)
+- `housing.md` — Kampung Kita: denah kavling, harga, aturan klaim/bangun/upgrade, model data & collider dinamis (Tahap 6)
 - `roadmap.md` — rencana tahap berikutnya
 
 ## Struktur
@@ -80,6 +81,12 @@ Uji beban 50 pemain: server menyala, lalu `cd server && npm run test:load`.
   npm run test:economy
   ```
   Membuktikan saldo awal 500 KC, bonus harian +100 KC (klaim kedua di hari yang sama ditolak), tamu ditolak bonus & pekerjaan, gaji 180 KC dari pekerjaan kebersihan dibayar tepat sekali, cooldown 10 menit ditegakkan server, dan saldo persisten setelah masuk lagi. Detail ekonomi: `docs/economy.md`.
+- **Otomatis (perumahan Tahap 6):**
+  ```bash
+  cd server
+  npm run test:plots
+  ```
+  Uji ini mengelola servernya sendiri (port 2577 + folder data sementara), jadi tidak perlu server lain menyala. Membuktikan klaim kavling ditolak saat saldo kurang, saldo terpotong tepat (klaim 2.500 KC, bangun 2.000 KC, upgrade hanya selisih 3.000 KC), klaim ganda ditolak dua arah, Rumah Tingkat ditolak di Kavling 1, kepemilikan terlihat klien lain di state, collider rumah menahan pemain, teleport "Ke Rumahku" bekerja, dan semuanya persisten setelah server restart. Detail perumahan: `docs/housing.md`.
 - **Manual:** buka game di dua perangkat/tab berbeda, masuk dengan nama berbeda, bergerak & chat — avatar harus terlihat bergerak di layar satu sama lain.
 - **Build produksi:** `cd client && npm run build` dan `cd server && npm run build` harus selesai tanpa error.
 
