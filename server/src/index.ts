@@ -97,7 +97,7 @@ app.get("/auth/me", (req, res) => {
   if (!username) return res.status(401).json({ ok: false, error: "Sesi tidak sah. Masuk lagi ya." });
   const user = accounts.getUser(username);
   if (!user) return res.status(404).json({ ok: false, error: "Akun tidak ditemukan." });
-  return res.json({ ok: true, username: user.username, profile: user.profile, lastOnline: user.lastOnline, friends: user.friends });
+  return res.json({ ok: true, username: user.username, profile: user.profile, lastOnline: user.lastOnline, friends: user.friends, balance: user.economy.balance });
 });
 
 app.post("/auth/profile", (req, res) => {
