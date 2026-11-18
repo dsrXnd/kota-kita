@@ -339,6 +339,12 @@ if (!summaryFound) fail("Kabar Kota tidak memuat ringkasan 'dihadiri 1 warga' se
 console.log("✅ Event selesai: Kabar Kota merangkum 'dihadiri 1 warga' — akun di zona tercatat, tamu TIDAK dihitung");
 
 // ---------- Fase 5: Quest Kerja Keras (+5) & Sapa Warga (+10) ----------
+// Pilihan pekerjaan (Tahap 10): A memilih kebersihan + penjaga_warung dulu
+// (pilihan pertama gratis — saldo quest di bawah tidak berubah karenanya).
+const chooseP = nextMessage(roomA, "job_choose_result");
+roomA.send("job_choose", { jobIds: ["kebersihan", "penjaga_warung"] });
+const chosen = await chooseP;
+if (!chosen?.ok) fail(`job_choose A ditolak: ${JSON.stringify(chosen)}`);
 // Kerja Keras: selesaikan sif kebersihan (gaji 180) → quest +5 KC.
 const jobStartP = nextMessage(roomA, "job_result");
 roomA.send("job_start", { jobId: "kebersihan" });

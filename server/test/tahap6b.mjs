@@ -25,6 +25,11 @@
 //     tanpa attempt terpakai.
 //  E. Malam server: isNight benar di state; Satpam diterima & +250 KC
 //     setelah 60 detik jaga; cooldown Satpam ≈150 mnt.
+// PENYESUAIAN TAHAP 10 (gerbang pilihan pekerjaan): setiap akun yang bekerja
+// kini MEMILIH 2 pekerjaannya dulu (pilihan pertama gratis). Akun yang
+// bekerja > 2 pekerjaan dalam suite ini membayar ganti pilihan 500 KC di
+// titik yang ditandai, dan ekspektasi saldo absolut sesudahnya bergeser
+// tepat −500 per ganti (dijelaskan di tiap titik). Sisanya tidak berubah.
 import { Client } from "colyseus.js";
 import { spawn } from "child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "fs";
@@ -253,6 +258,12 @@ async function startJob(room, jobId) {
   return p;
 }
 
+async function chooseJobs(room, jobIds) {
+  const p = nextMessage(room, "job_choose_result");
+  room.send("job_choose", { jobIds });
+  return p;
+}
+
 async function balanceOf(token) {
   const me = await api("/auth/me", null, token);
   return me.data.balance;
@@ -287,6 +298,10 @@ const tokenW = await register(userW);
 {
   const client = new Client(WS);
   const room = await client.joinOrCreate("kota", { name: "UjiStreak", token: tokenS });
+  // Pilihan pekerjaan (Tahap 10): S memilih satpam + penjaga (gratis) agar
+  // penolakan A4 di bawah murni soal SIANG, bukan soal pilihan.
+  const chS = await chooseJobs(room, ["satpam", "penjaga_warung"]);
+  if (!chS?.ok) fail(`Pilihan pekerjaan S gagal: ${JSON.stringify(chS)}`);
   const jobs = await getJobs(room);
   if (jobs.jobs.length !== 6) fail(`Daftar pekerjaan harusnya 6, terbaca ${jobs.jobs.length}`);
   if (!jobs.bonusAvailable || jobs.bonusReward !== 10 || jobs.bonusStreakDay !== 1) {
@@ -338,6 +353,9 @@ const tokenW = await register(userW);
   const client = new Client(WS);
   const room = await client.joinOrCreate("kota", { name: "UjiKonkur", token: tokenK });
   const track = trackActives(room);
+  // Pilihan pekerjaan (Tahap 10): K memilih penjaga + kebersihan dulu (gratis).
+  const chK = await chooseJobs(room, ["penjaga_warung", "kebersihan"]);
+  if (!chK?.ok) fail(`Pilihan pekerjaan K gagal: ${JSON.stringify(chK)}`);
   let r = await startJob(room, "penjaga_warung");
   if (!r?.ok) fail(`Mulai penjaga gagal: ${JSON.stringify(r)}`);
   r = await startJob(room, "kebersihan");
@@ -349,6 +367,13 @@ const tokenW = await register(userW);
   room.send("job_cancel", { jobId: "penjaga_warung" });
   room.send("job_cancel", { jobId: "kebersihan" });
   await wait(400);
+  // Tahap 10: sebelum mencoba dua pekerjaan antar, K GANTI PILIHAN ke
+  // [kurir, ojek] — biaya 500 KC terbakar. Saldo K tepat 500 → sisa 0, yang
+  // juga membuktikan spendKC mengizinkan saldo == biaya. Bagian ini tidak
+  // menegaskan saldo lain, jadi aman.
+  const chK2 = await chooseJobs(room, ["kurir", "ojek"]);
+  if (!chK2?.ok || chK2.charged !== 500) fail(`Ganti pilihan K gagal: ${JSON.stringify(chK2)}`);
+  if ((await balanceOf(tokenK)) !== 0) fail(`Saldo K setelah ganti pilihan harusnya 0, terbaca ${await balanceOf(tokenK)}`);
   r = await startJob(room, "kurir");
   if (!r?.ok) fail(`Mulai kurir gagal: ${JSON.stringify(r)}`);
   r = await startJob(room, "ojek");
@@ -363,6 +388,8 @@ const tokenW = await register(userW);
 {
   const client = new Client(WS);
   const room = await client.joinOrCreate("kota", { name: "UjiTaman", token: tokenT });
+  const chT = await chooseJobs(room, ["taman", "kebersihan"]);
+  if (!chT?.ok) fail(`Pilihan pekerjaan T gagal: ${JSON.stringify(chT)}`);
   const r = await startJob(room, "taman");
   if (!r?.ok) fail(`Mulai taman gagal: ${JSON.stringify(r)}`);
   const doneP = waitForEarned(room, 170, 180000);
@@ -381,6 +408,8 @@ const tokenW = await register(userW);
   const client = new Client(WS);
   const room = await client.joinOrCreate("kota", { name: "UjiOjek", token: tokenO });
   const track = trackActives(room);
+  const chO = await chooseJobs(room, ["ojek", "penjaga_warung"]);
+  if (!chO?.ok) fail(`Pilihan pekerjaan O gagal: ${JSON.stringify(chO)}`);
   const r = await startJob(room, "ojek");
   if (!r?.ok) fail(`Mulai ojek gagal: ${JSON.stringify(r)}`);
   await completeDelivery(room, track, 220);
@@ -394,6 +423,8 @@ const tokenW = await register(userW);
   const client = new Client(WS);
   const room = await client.joinOrCreate("kota", { name: "UjiPenjaga", token: tokenP });
   const track = trackActives(room);
+  const chP = await chooseJobs(room, ["penjaga_warung", "kurir"]);
+  if (!chP?.ok) fail(`Pilihan pekerjaan P gagal: ${JSON.stringify(chP)}`);
   let r = await startJob(room, "penjaga_warung");
   if (!r?.ok) fail(`Mulai penjaga gagal: ${JSON.stringify(r)}`);
   const doneP = waitForEarned(room, 150, 120000);
@@ -559,6 +590,10 @@ await waitServerUp();
   const client = new Client(WS);
   const room = await client.joinOrCreate("kota", { name: "UjiNeeds", token: tokenN });
   await wait(400);
+  // Pilihan pekerjaan (Tahap 10): N memilih kebersihan dulu (gratis) agar
+  // penolakan di bawah murni soal kebutuhan kritis & start pasca-pulih sah.
+  const chN = await chooseJobs(room, ["kebersihan", "penjaga_warung"]);
+  if (!chN?.ok) fail(`Pilihan pekerjaan N gagal: ${JSON.stringify(chN)}`);
   const r = await startJob(room, "kebersihan");
   if (!r || r.ok) fail("job_start saat lapar kritis (0) harusnya DITOLAK");
   // Ukur kecepatan: sprint ke utara 2 detik dari posisi diam.
@@ -647,6 +682,10 @@ await waitServerUp();
     room.send("job_skip", { jobId });
     return p;
   };
+  // Pilihan pekerjaan (Tahap 10): W memilih penjaga + kebersihan dulu
+  // (gratis). Sebelum D6 (Taman) W membayar ganti pilihan 500 KC — lihat D6.
+  const chW = await chooseJobs(room, ["penjaga_warung", "kebersihan"]);
+  if (!chW?.ok) fail(`Pilihan pekerjaan W gagal: ${JSON.stringify(chW)}`);
   // D1. Skip pekerjaan yang TIDAK cooldown → ditolak, tanpa biaya, attempt utuh.
   let s = await skip("taman");
   if (!s || s.ok) fail("Skip pekerjaan yang tidak cooldown harusnya ditolak");
@@ -690,6 +729,12 @@ await waitServerUp();
   if ((await balanceOf(tokenW)) !== 20195) fail(`Saldo setelah skip kebersihan harusnya 20195, terbaca ${await balanceOf(tokenW)}`);
 
   // D6. Taman selesai → skip −70 KC (attempt 1 → 0).
+  // Tahap 10: Taman bukan pilihan W — bayar ganti pilihan 500 KC dulu
+  // (20195 → 19695). Karena itu ekspektasi akhir D6 bergeser tepat −500:
+  // 19695 + 170 gaji − 70 skip = 19795 (sebelum Tahap 10: 20295).
+  const chW2 = await chooseJobs(room, ["penjaga_warung", "taman"]);
+  if (!chW2?.ok || chW2.charged !== 500) fail(`Ganti pilihan W gagal: ${JSON.stringify(chW2)}`);
+  if ((await balanceOf(tokenW)) !== 19695) fail(`Saldo W setelah ganti pilihan harusnya 19695, terbaca ${await balanceOf(tokenW)}`);
   r = await startJob(room, "taman");
   if (!r?.ok) fail(`Mulai taman (skip suite) gagal: ${JSON.stringify(r)}`);
   const doneT = waitForEarned(room, 170, 180000);
@@ -699,7 +744,7 @@ await waitServerUp();
   if (!s?.ok) fail(`Skip taman gagal: ${JSON.stringify(s)}`);
   jobs = await getJobs(room);
   if (jobs.skipAttemptsLeft !== 0) fail(`Attempt setelah 3x skip harusnya 0, terbaca ${jobs.skipAttemptsLeft}`);
-  if ((await balanceOf(tokenW)) !== 20295) fail(`Saldo setelah skip taman harusnya 20295, terbaca ${await balanceOf(tokenW)}`);
+  if ((await balanceOf(tokenW)) !== 19795) fail(`Saldo setelah skip taman harusnya 19795, terbaca ${await balanceOf(tokenW)}`);
   console.log("✅ Skip Kebersihan −80 KC & Taman −70 KC — attempt bersama habis (0 tersisa)");
 
   // D7. Taman selesai lagi (sedang cooldown) → skip ke-4 DITOLAK (attempt habis).
@@ -753,6 +798,9 @@ const tokenM = await register(userM);
   if (room.state.isNight !== true) fail("Fase ini harusnya malam server (isNight=true)");
   if (Math.abs(room.state.worldTime - room2.state.worldTime) > 0.01) fail("worldTime dua klien di malam hari berbeda");
   console.log(`✅ Malam server: isNight=true di state, worldTime sama untuk dua klien (${room.state.worldTime.toFixed(3)})`);
+  // Pilihan pekerjaan (Tahap 10): M memilih satpam + penjaga (gratis).
+  const chM = await chooseJobs(room, ["satpam", "penjaga_warung"]);
+  if (!chM?.ok) fail(`Pilihan pekerjaan M gagal: ${JSON.stringify(chM)}`);
   const r = await startJob(room, "satpam");
   if (!r?.ok) fail(`Satpam harusnya DITERIMA saat malam: ${JSON.stringify(r)}`);
   const doneP = waitForEarned(room, 250, 150000);

@@ -5,6 +5,8 @@
 //  2. Klaim check-in streak Hari 1: 500 -> 510 (+10 KC, tangga streak Tahap 6B
 //     menggantikan bonus rata +100 KC); klaim kedua di hari yang sama ditolak.
 //  3. Tamu ditolak untuk bonus_claim dan job_start.
+//  3b. Pilihan pekerjaan (Tahap 10): akun memilih [kebersihan, penjaga_warung]
+//      dulu — pilihan pertama GRATIS, saldo tidak berubah.
 //  4. Pekerjaan kebersihan diselesaikan dengan BERJALAN ke 5 titik (input gerak,
 //     bukan teleport) -> gaji 180 KC dibayar TEPAT sekali (510 -> 695:
 //     gaji 180 + hadiah quest harian Kerja Keras +5 KC dari Tahap 9).
@@ -135,6 +137,15 @@ const guestJob = await guestJobPromise;
 if (!guestJob || guestJob.ok) fail("Tamu harusnya ditolak saat job_start");
 await guestRoom.leave();
 console.log("✅ Tamu ditolak untuk bonus_claim dan job_start");
+
+// 3b. Pilihan pekerjaan (Tahap 10): pilih dulu 2 pekerjaan — pilihan pertama gratis.
+const choosePromise = nextMessage(room, "job_choose_result");
+room.send("job_choose", { jobIds: ["kebersihan", "penjaga_warung"] });
+const chosen = await choosePromise;
+if (!chosen?.ok) fail(`job_choose pertama ditolak: ${JSON.stringify(chosen)}`);
+const me2b = await api("/auth/me", null, token);
+if (me2b.data.balance !== 510) fail(`Pilihan pertama harusnya gratis, saldo terbaca ${me2b.data.balance} (harusnya 510)`);
+console.log("✅ Pilihan pekerjaan pertama gratis (kebersihan + penjaga_warung), saldo tetap 510");
 
 // 4. Selesaikan pekerjaan kebersihan dengan berjalan ke 5 titik.
 const startPromise = nextMessage(room, "job_result");
