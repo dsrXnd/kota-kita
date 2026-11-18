@@ -97,7 +97,7 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
   - 🍗 Lapar: jajanan **20 KC**, makan besar **45 KC** (penuh) · **gratis** masak di rumah sendiri
   - 🚽 Kebelet: WC umum Balai Kota **gratis** · WC bersih instan dekat plaza **5 KC** · gratis di rumah sendiri
 - [x] Efek kritis ringan (tanpa kematian): kecepatan lari turun & tidak bisa memulai sif kerja sampai kebutuhan teratasi
-- [ ] Di Tahap 7 kebutuhan ini menjadi permintaan bagi lapak pemain (makan di lapak pemain lain = KC berpindah ke pemilik)
+- [x] Di Tahap 7 kebutuhan ini menjadi permintaan bagi lapak pemain (makan di lapak pemain lain = KC berpindah ke pemilik) — *selesai di Tahap 7*
 
 **Pekerjaan baru (melengkapi 3 pekerjaan Tahap 5):**
 - [x] 🌷 **Petugas Taman — 170 KC**: datangi & siram 6 titik tanaman keliling plaza/taman
@@ -116,12 +116,12 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
 
 ## Tahap 7 — Usaha Pemain (Pasar)
 
-- [ ] Kawasan **Pasar** (dari daftar tunggu Tahap 4) berisi lapak-lapak yang bisa dimiliki akun memakai KC — **harga lapak DIKUNCI user 18 Nov 2026: 10.000 KC** (satu-satunya aset produktif: menghasilkan KC dari penjualan ke pemain lain)
-- [ ] Pemilik lapak menjual barang sederhana (kopi, bakso, es teh, batik) dengan harga dalam rentang yang diatur sistem; pemain lain membeli lewat tombol interaksi → KC berpindah antar-akun secara atomik di server
-- [ ] Penghasilan lapak terkumpul sebagai "kas usaha" yang diambil pemilik saat berkunjung (mendorong pemilik online & berinteraksi — kekuatan real-time kita)
-- [ ] Peran sosial baru muncul alami: pedagang & pembeli bertemu langsung, bisa chat & tawar lewat chat
+- [x] Kawasan **Pasar** (dari daftar tunggu Tahap 4) berisi lapak-lapak yang bisa dimiliki akun memakai KC — **harga lapak DIKUNCI user 18 Nov 2026: 10.000 KC** (satu-satunya aset produktif: menghasilkan KC dari penjualan ke pemain lain)
+- [x] Pemilik lapak menjual barang sederhana (kopi, bakso, es teh, batik) dengan harga dalam rentang yang diatur sistem; pemain lain membeli lewat tombol interaksi → KC berpindah antar-akun secara atomik di server
+- [x] Penghasilan lapak terkumpul sebagai "kas usaha" yang diambil pemilik saat berkunjung (mendorong pemilik online & berinteraksi — kekuatan real-time kita)
+- [x] Peran sosial baru muncul alami: pedagang & pembeli bertemu langsung, bisa chat & tawar lewat chat
 
-**Selesai bila:** uji otomatis LULUS — pembelian mengurangi saldo pembeli & menambah kas usaha pemilik dengan jumlah sama, pembelian saat saldo kurang ditolak, non-pemilik tidak bisa mengambil kas usaha, semua tercatat di mutasi.
+**Selesai bila:** ✅ TERBUKTI `test:market` (18 Nov 2026) — pembelian mengurangi saldo pembeli & menambah kas usaha pemilik dengan jumlah sama, pembelian saat saldo kurang ditolak, non-pemilik tidak bisa mengambil kas usaha, semua tercatat di mutasi (ledger pembeli & log penjualan pemilik), kas tetap privat di luar state, dan semuanya persisten setelah server restart.
 
 ## Tahap 8 — Kota Hidup: Statistik, Kabar & Voting
 

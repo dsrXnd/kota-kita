@@ -120,6 +120,7 @@ economy: {
   skipUsed: number;                   // attempt skip terpakai pada skipDay
   jobLastDone: Record<string, number>; // jobId -> ms epoch sif terakhir selesai
   needs: { hunger: number; thirst: number; toilet: number }; // meter 0..100 (docs/needs.md)
+  souvenirs: number;                  // suvenir batik dari lapak pemain (Tahap 7)
   ledger: Array<{ ts: number; delta: number; reason: string; balanceAfter: number }>;
 }
 ```
@@ -128,3 +129,28 @@ Akun lama (dibuat sebelum Tahap 5/6B) otomatis dilengkapi kolom ini
 dengan nilai bawaan saat server menyala — tidak ada migrasi manual.
 `GET /auth/me` mengembalikan `balance` (baca saja; mengubah saldo tetap
 hanya bisa lewat jalur permainan di atas).
+
+## Usaha pemain — Pasar (Tahap 7)
+
+Satu-satunya **aset produktif** kota: lapak di kawasan Pasar bisa diklaim
+seharga **10.000 KC** (satu akun satu lapak, independen dari kavling) dan
+dipakai menjual 4 barang ke pemain lain. Detail lengkap (denah, katalog
+& rentang harga, model data) ada di `docs/market.md`; ringkasnya:
+
+- **KC berpindah antar-akun secara atomik di server:** pembelian yang
+  lolos validasi memotong saldo pembeli lewat `spendKC` dan menambah
+  **kas usaha** lapak dengan jumlah yang sama dalam satu langkah sinkron;
+  bila satu syarat gagal, tidak ada perubahan apa pun.
+- **Kas usaha bukan saldo:** hasil penjualan menumpuk di data lapak
+  (privat — tidak ada di state room) dan baru masuk saldo pemilik saat ia
+  berkunjung & mengambilnya lewat `creditKC`. Non-pemilik tidak bisa
+  mengambil kas.
+- **Harga diatur sistem:** pemilik bebas mengatur harga di dalam rentang
+  per barang (Es Teh 5–25, Kopi 5–30, Bakso 15–60, Batik 50–250 KC) &
+  membuka/menutup stok; di luar rentang ditolak server.
+- **Kebutuhan menjadi permintaan:** Es Teh/Kopi/Bakso yang dibeli dari
+  lapak mengisi meter pembeli dengan logika Tahap 6B yang sama — jalur
+  berbayar alternatif selain titik NPC, dengan KC masuk ke warga lain,
+  bukan ke server. Batik adalah suvenir: menambah penghitung `souvenirs`
+  persisten di data ekonomi pembeli (kolom baru di `accounts.json`,
+  ikut dikembalikan `GET /auth/me`).
