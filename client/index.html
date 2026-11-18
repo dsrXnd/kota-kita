@@ -106,9 +106,16 @@
           <button id="btn-jobs" class="icon-btn" title="Pekerjaan & Koin Kota">💼</button>
           <button id="btn-friends" class="icon-btn" title="Teman & pemain">👥</button>
           <button id="btn-sound" class="icon-btn" title="Suara nyala/mati">🔊</button>
-          <button id="btn-daynight" class="icon-btn" title="Siang / malam">🌙</button>
+          <button id="btn-daynight" class="icon-btn" title="Waktu dunia (diatur server)">☀️</button>
           <button id="btn-photo" class="icon-btn" title="Ambil foto">📸</button>
         </div>
+      </div>
+
+      <!-- Strip kebutuhan hidup ringkas (Tahap 6B) — angka dari server -->
+      <div id="needs-strip" title="Kebutuhan hidup — kelola di panel 💼">
+        <span class="ns-item">🍗<span class="ns-bar"><span id="ns-hunger-fill" class="ns-fill"></span></span></span>
+        <span class="ns-item">💧<span class="ns-bar"><span id="ns-thirst-fill" class="ns-fill"></span></span></span>
+        <span class="ns-item">🚽<span class="ns-bar"><span id="ns-toilet-fill" class="ns-fill"></span></span></span>
       </div>
 
       <div id="joystick"><div id="joystick-knob"></div></div>
@@ -153,11 +160,27 @@
       <div id="jobs-panel" class="hidden">
         <h3>💼 Pekerjaan &amp; Koin Kota</h3>
         <p id="jobs-balance">Memuat data pekerjaan…</p>
-        <button id="btn-claim-bonus" class="hidden">🎁 Klaim bonus harian</button>
+        <button id="btn-claim-bonus" class="hidden">🎁 Check-in harian</button>
         <div id="jobs-active" class="hidden">
-          <div id="jobs-active-title"></div>
-          <div id="jobs-active-progress"></div>
-          <button id="btn-job-cancel">Batalkan sif</button>
+          <div class="friends-label">Sif aktif (maks. 2)</div>
+          <div id="jobs-active-list"></div>
+        </div>
+        <div class="friends-label">Kebutuhan hidup</div>
+        <div id="needs-box">
+          <div class="need-row"><span class="need-label">🍗 Lapar</span><span class="need-bar"><span id="need-hunger-fill" class="need-fill"></span></span><span id="need-hunger-val" class="need-val">100</span></div>
+          <div class="need-row"><span class="need-label">💧 Haus</span><span class="need-bar"><span id="need-thirst-fill" class="need-fill"></span></span><span id="need-thirst-val" class="need-val">100</span></div>
+          <div class="need-row"><span class="need-label">🚽 Kebelet</span><span class="need-bar"><span id="need-toilet-fill" class="need-fill"></span></span><span id="need-toilet-val" class="need-val">100</span></div>
+          <div id="needs-actions">
+            <button class="mini-btn" data-refill="drink_fountain">💧 Air Mancur — Gratis</button>
+            <button class="mini-btn" data-refill="drink_bottle">🧴 Air Mineral — 10 KC</button>
+            <button class="mini-btn" data-refill="eat_snack">🍢 Jajanan — 20 KC</button>
+            <button class="mini-btn" data-refill="eat_meal">🍛 Makan Besar — 45 KC</button>
+            <button class="mini-btn" data-refill="cook_home">🍳 Masak di Rumah — Gratis</button>
+            <button class="mini-btn" data-refill="wc_public">🚻 WC Balai Kota — Gratis</button>
+            <button class="mini-btn" data-refill="wc_paid">🚽 WC Bersih — 5 KC</button>
+            <button class="mini-btn" data-refill="wc_home">🏠 WC Rumah — Gratis</button>
+          </div>
+          <p class="note">Tombol isi ulang bekerja saat kamu berada di tempatnya — server yang memeriksa posisi &amp; saldo. Selalu ada jalur GRATIS: air mancur, WC Balai Kota, dan rumahmu sendiri.</p>
         </div>
         <div class="friends-label">Daftar pekerjaan</div>
         <div id="jobs-list"></div>
