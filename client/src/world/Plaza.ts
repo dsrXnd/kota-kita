@@ -28,9 +28,10 @@ export const COLLIDERS: ReadonlyArray<readonly [number, number, number, number]>
 
 const PLAYER_RADIUS = 0.35;
 
-/** Cermin resolveCollisions di server, untuk prediksi lokal. */
-export function resolveCollisions(pos: { x: number; z: number }): void {
-  for (const [minX, maxX, minZ, maxZ] of COLLIDERS) {
+type Box = readonly [number, number, number, number];
+
+function resolveAgainst(pos: { x: number; z: number }, boxes: ReadonlyArray<Box>): void {
+  for (const [minX, maxX, minZ, maxZ] of boxes) {
     const nearX = Math.max(minX - PLAYER_RADIUS, Math.min(pos.x, maxX + PLAYER_RADIUS));
     const nearZ = Math.max(minZ - PLAYER_RADIUS, Math.min(pos.z, maxZ + PLAYER_RADIUS));
     const dx = pos.x - nearX;
@@ -47,6 +48,12 @@ export function resolveCollisions(pos: { x: number; z: number }): void {
       else pos.z = maxZ + PLAYER_RADIUS;
     }
   }
+}
+
+/** Cermin resolveCollisions di server, untuk prediksi lokal. `extra` = kotak dinamis (rumah pemain, Tahap 6). */
+export function resolveCollisions(pos: { x: number; z: number }, extra: ReadonlyArray<Box> = []): void {
+  resolveAgainst(pos, COLLIDERS);
+  if (extra.length > 0) resolveAgainst(pos, extra);
 }
 
 // Palet resmi proyek (docs/art-style.md)
@@ -112,7 +119,7 @@ export class Plaza {
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     scene.background = COLORS.skyDay.clone();
-    scene.fog = new THREE.Fog(COLORS.skyDay.getHex(), 55, 130);
+    scene.fog = new THREE.Fog(COLORS.skyDay.getHex(), 60, 240);
 
     this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x6a8f5f, 0.95);
     scene.add(this.hemi);
@@ -120,10 +127,10 @@ export class Plaza {
     this.sun.position.set(28, 42, 18);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.left = -52;
-    this.sun.shadow.camera.right = 52;
-    this.sun.shadow.camera.top = 52;
-    this.sun.shadow.camera.bottom = -52;
+    this.sun.shadow.camera.left = -55;
+    this.sun.shadow.camera.right = 145;
+    this.sun.shadow.camera.top = 55;
+    this.sun.shadow.camera.bottom = -55;
     this.sun.shadow.camera.far = 120;
     this.sun.shadow.bias = -0.0004;
     scene.add(this.sun);
@@ -173,8 +180,10 @@ export class Plaza {
   // ---------- pembangunan dunia ----------
 
   private buildGround() {
-    const grass = new THREE.Mesh(new THREE.PlaneGeometry(96, 96), mat(COLORS.grass));
+    // Lapangan rumput membentang dari plaza lama (x -48) sampai ujung Kampung Kita (x 140).
+    const grass = new THREE.Mesh(new THREE.PlaneGeometry(188, 96), mat(COLORS.grass));
     grass.rotation.x = -Math.PI / 2;
+    grass.position.x = 46;
     grass.receiveShadow = true;
     this.group.add(grass);
 
@@ -416,10 +425,10 @@ export class Plaza {
     this.palm(-21, -6);
     this.palm(21, 6);
 
-    // Pagar tanaman di tepi dunia.
+    // Pagar tanaman di tepi dunia (timur kini di ujung Kampung Kita, x ±139).
     const hedgeMat = mat(0x4da657);
     const seg: Array<[number, number, number, number]> = [
-      [0, -45, 92, 1.2], [0, 45, 92, 1.2], [-45, 0, 1.2, 92], [45, 0, 1.2, 92],
+      [46, -45, 188, 1.2], [46, 45, 188, 1.2], [-45, 0, 1.2, 92], [139, 0, 1.2, 92],
     ];
     for (const [x, z, w, d] of seg) {
       const h = new THREE.Mesh(new THREE.BoxGeometry(w, 1.1, d), hedgeMat);
