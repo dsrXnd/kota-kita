@@ -85,34 +85,34 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
 *Spek DIKUNCI user 18 Nov 2026. Dibangun setelah Tahap 6 karena rumah adalah "markas gratis" untuk kebutuhan dasar.*
 
 **Bonus check-in streak (mengubah bonus Tahap 5 — keputusan user 18 Nov 2026):**
-- [ ] Bonus harian rata 100 KC **DIGANTIKAN** sistem streak check-in (bukan tambahan): klaim beruntun per hari kalender Asia/Jakarta — Hari 1: **10 KC**, Hari 2: **20**, Hari 3: **30**, Hari 4: **40**, Hari 5: **50**, Hari 6: **60**, Hari 7: **150 KC** (jackpot mingguan; total 360 KC/minggu); kelewat 1 hari → hitungan **kembali ke Hari 1**; siklus 7 hari berulang
+- [x] Bonus harian rata 100 KC **DIGANTIKAN** sistem streak check-in (bukan tambahan): klaim beruntun per hari kalender Asia/Jakarta — Hari 1: **10 KC**, Hari 2: **20**, Hari 3: **30**, Hari 4: **40**, Hari 5: **50**, Hari 6: **60**, Hari 7: **150 KC** (jackpot mingguan; total 360 KC/minggu); kelewat 1 hari → hitungan **kembali ke Hari 1**; siklus 7 hari berulang
 
 **Waktu dunia (menggantikan toggle siang/malam manual):**
-- [ ] Siklus siang-malam diatur **server** dan sama untuk semua pemain: **1 hari game = 24 menit asli (16 menit siang, 8 menit malam)** — keputusan user: siklus cepat
+- [x] Siklus siang-malam diatur **server** dan sama untuk semua pemain: **1 hari game = 24 menit asli (16 menit siang, 8 menit malam)** — keputusan user: siklus cepat
 
 **Kebutuhan hidup (3 meter di HUD: 🍗 Lapar · 💧 Haus · 🚽 Kebelet):**
-- [ ] Meter berkurang perlahan **hanya selama bermain** (±50 menit dari penuh ke kosong); tidak berkurang saat offline; peringatan di 25%
-- [ ] Prinsip desain: **selalu ada jalur gratis** — yang berbayar adalah jalur instan/nyaman; pemain tidak boleh terkunci dari bermain karena miskin KC
+- [x] Meter berkurang perlahan **hanya selama bermain** (±50 menit dari penuh ke kosong); tidak berkurang saat offline; peringatan di 25%
+- [x] Prinsip desain: **selalu ada jalur gratis** — yang berbayar adalah jalur instan/nyaman; pemain tidak boleh terkunci dari bermain karena miskin KC
   - 💧 Haus: air mineral **10 KC** di warung/lapak · **gratis** di air mancur plaza
   - 🍗 Lapar: jajanan **20 KC**, makan besar **45 KC** (penuh) · **gratis** masak di rumah sendiri
   - 🚽 Kebelet: WC umum Balai Kota **gratis** · WC bersih instan dekat plaza **5 KC** · gratis di rumah sendiri
-- [ ] Efek kritis ringan (tanpa kematian): kecepatan lari turun & tidak bisa memulai sif kerja sampai kebutuhan teratasi
+- [x] Efek kritis ringan (tanpa kematian): kecepatan lari turun & tidak bisa memulai sif kerja sampai kebutuhan teratasi
 - [ ] Di Tahap 7 kebutuhan ini menjadi permintaan bagi lapak pemain (makan di lapak pemain lain = KC berpindah ke pemilik)
 
 **Pekerjaan baru (melengkapi 3 pekerjaan Tahap 5):**
-- [ ] 🌷 **Petugas Taman — 170 KC**: datangi & siram 6 titik tanaman keliling plaza/taman
-- [ ] 🛵 **Ojek Makanan — 220 KC**: ambil makanan dari toko acak, antar ke titik tujuan acak dalam 120 detik
-- [ ] 🌙 **Satpam Malam — 250 KC**: jaga area Balai Kota 60 detik terakumulasi; sif hanya bisa diambil saat **malam server**
+- [x] 🌷 **Petugas Taman — 170 KC**: datangi & siram 6 titik tanaman keliling plaza/taman
+- [x] 🛵 **Ojek Makanan — 220 KC**: ambil makanan dari toko acak, antar ke titik tujuan acak dalam 120 detik
+- [x] 🌙 **Satpam Malam — 250 KC**: jaga area Balai Kota 60 detik terakumulasi; sif hanya bisa diambil saat **malam server**
 
 **Cooldown per pekerjaan (keputusan user, menggantikan rata 10 menit Tahap 5; tetap berjalan saat offline & tersimpan di server):**
-- [ ] Penjaga Warung Kopi **90 menit** · Petugas Taman **120 menit** · Petugas Kebersihan **120 menit** · Kurir Paket **120 menit** · Ojek Makanan **145 menit** · Satpam Malam **150 menit**
+- [x] Penjaga Warung Kopi **90 menit** · Petugas Taman **120 menit** · Petugas Kebersihan **120 menit** · Kurir Paket **120 menit** · Ojek Makanan **145 menit** · Satpam Malam **150 menit**
 
 **Sistem skip cooldown berbayar (keputusan user):**
-- [ ] Pemain memegang maksimal **2 pekerjaan aktif** sekaligus, dan dua-duanya tidak boleh sama-sama pekerjaan antar (Kurir + Ojek ditolak server)
-- [ ] Dari 2 pekerjaan yang diambil, pemain punya **3 attempt skip cooldown per hari** (jatah bersama, reset harian bareng bonus harian, zona Asia/Jakarta): membayar biaya per pekerjaan untuk mengambil lagi pekerjaan yang sedang cooldown — Penjaga **60 KC**, Taman **70 KC**, Kebersihan **80 KC**, Kurir **90 KC**, Ojek **110 KC**, Satpam **125 KC** (40–50% dari gaji; biaya **terbakar** dari peredaran KC)
-- [ ] Biaya skip **hangus** bila sif dibatalkan atau gagal; peringatan ditampilkan jelas di client sebelum pembayaran dikonfirmasi
+- [x] Pemain memegang maksimal **2 pekerjaan aktif** sekaligus, dan dua-duanya tidak boleh sama-sama pekerjaan antar (Kurir + Ojek ditolak server)
+- [x] Dari 2 pekerjaan yang diambil, pemain punya **3 attempt skip cooldown per hari** (jatah bersama, reset harian bareng bonus harian, zona Asia/Jakarta): membayar biaya per pekerjaan untuk mengambil lagi pekerjaan yang sedang cooldown — Penjaga **60 KC**, Taman **70 KC**, Kebersihan **80 KC**, Kurir **90 KC**, Ojek **110 KC**, Satpam **125 KC** (40–50% dari gaji; biaya **terbakar** dari peredaran KC)
+- [x] Biaya skip **hangus** bila sif dibatalkan atau gagal; peringatan ditampilkan jelas di client sebelum pembayaran dikonfirmasi
 
-**Selesai bila:** uji otomatis LULUS — meter hanya berkurang saat bermain & jalur gratis berfungsi, efek kritis diterapkan server, cooldown per pekerjaan sesuai tabel & bertahan setelah relogin, skip berbayar mengurangi saldo + jatah attempt dengan benar (attempt ke-4 ditolak, skip tanpa saldo ditolak), dua pekerjaan antar bersamaan ditolak, Satpam ditolak saat siang server — plus regresi penuh tetap hijau.
+**Selesai bila:** ✅ TERBUKTI `test:6b` (18 Nov 2026) — meter hanya berkurang saat bermain & jalur gratis berfungsi, efek kritis diterapkan server, cooldown per pekerjaan sesuai tabel & bertahan setelah relogin, skip berbayar mengurangi saldo + jatah attempt dengan benar (attempt ke-4 ditolak, skip tanpa saldo ditolak), dua pekerjaan antar bersamaan ditolak, Satpam ditolak saat siang server — plus regresi penuh tetap hijau.
 
 ## Tahap 7 — Usaha Pemain (Pasar)
 
