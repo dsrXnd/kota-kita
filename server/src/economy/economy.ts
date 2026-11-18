@@ -231,6 +231,19 @@ export const MAX_ACTIVE_SHIFTS = 2;
 /** Jatah skip cooldown berbayar per akun per hari kalender Asia/Jakarta (jatah bersama). */
 export const MAX_SKIP_PER_DAY = 3;
 
+// ---------- Pilihan pekerjaan (Tahap 10) ----------
+
+/**
+ * Tiap akun memilih TEPAT 2 pekerjaan sebagai "pekerjaannya" — hanya dua
+ * itu yang bisa diambil sifnya (keputusan user dari tes main 18 Nov 2026:
+ * satu warga tidak boleh mengerjakan semua pekerjaan). Pilihan pertama
+ * GRATIS; mengganti pilihan dikenakan biaya yang TERBAKAR (keluar dari
+ * peredaran, sama seperti biaya skip — TIDAK masuk Kas Kota).
+ */
+export const JOB_CHOOSE_COUNT = 2;
+/** Biaya ganti pilihan pekerjaan dalam KC (angka keputusan user: 500 KC). */
+export const JOB_CHANGE_FEE = 500;
+
 // ---------- Kebutuhan hidup (Tahap 6B) ----------
 
 export interface NeedsState {
