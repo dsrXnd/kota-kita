@@ -1,7 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
-import { KC_START_BALANCE, KC_DAILY_BONUS, JOB_COOLDOWN_MS, jakartaDayKey } from "../economy/economy";
+import {
+  KC_START_BALANCE,
+  JOBS,
+  MAX_SKIP_PER_DAY,
+  fullNeeds,
+  jakartaDayKey,
+  streakCycleDay,
+  streakReward,
+  type NeedsState,
+} from "../economy/economy";
 
 /**
  * Penyimpanan akun KOTA KITA (Tahap 3).
@@ -28,20 +37,37 @@ export interface ProfileData {
   shirtStyle: string;
 }
 
-/** Data ekonomi satu akun (Tahap 5) — semua perubahan lewat metode store ini. */
+/** Data ekonomi satu akun (Tahap 5 + 6B) — semua perubahan lewat metode store ini. */
 export interface EconomyData {
   /** Saldo Koin Kota (KC). */
   balance: number;
-  /** Hari terakhir bonus harian diklaim, kunci "YYYY-MM-DD" Asia/Jakarta ("" = belum pernah). */
+  /** Hari terakhir check-in diklaim, kunci "YYYY-MM-DD" Asia/Jakarta ("" = belum pernah). */
   lastBonusDay: string;
+  /** Jumlah hari check-in BERUNTUN sampai klaim terakhir (Tahap 6B). */
+  streakCount: number;
+  /** Hari jatah skip cooldown berlaku (kunci hari Asia/Jakarta). */
+  skipDay: string;
+  /** Jumlah attempt skip yang sudah dipakai pada skipDay. */
+  skipUsed: number;
   /** jobId -> waktu (ms) sif terakhir SELESAI — dasar cooldown, persisten agar tidak bisa diakali dengan relog. */
   jobLastDone: Record<string, number>;
+  /** Meter kebutuhan hidup 0..100 (Tahap 6B) — hanya berkurang saat bermain. */
+  needs: NeedsState;
   /** Catatan mutasi sederhana (maks. 50 entri terakhir). */
   ledger: Array<{ ts: number; delta: number; reason: string; balanceAfter: number }>;
 }
 
 export function defaultEconomy(): EconomyData {
-  return { balance: KC_START_BALANCE, lastBonusDay: "", jobLastDone: {}, ledger: [] };
+  return {
+    balance: KC_START_BALANCE,
+    lastBonusDay: "",
+    streakCount: 0,
+    skipDay: "",
+    skipUsed: 0,
+    jobLastDone: {},
+    needs: fullNeeds(),
+    ledger: [],
+  };
 }
 
 interface UserRecord {
@@ -120,7 +146,15 @@ export class AccountStore {
       if (!user.economy) user.economy = defaultEconomy();
       if (typeof user.economy.balance !== "number") user.economy.balance = KC_START_BALANCE;
       user.economy.lastBonusDay ??= "";
+      user.economy.streakCount ??= 0;
+      user.economy.skipDay ??= "";
+      user.economy.skipUsed ??= 0;
       user.economy.jobLastDone ??= {};
+      user.economy.needs ??= fullNeeds();
+      for (const k of ["hunger", "thirst", "toilet"] as const) {
+        const v = user.economy.needs[k];
+        user.economy.needs[k] = typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 100;
+      }
       user.economy.ledger ??= [];
     }
   }
@@ -221,26 +255,121 @@ export class AccountStore {
     return user.economy.balance;
   }
 
-  /** Bonus masuk harian: sekali per hari kalender Asia/Jakarta. */
-  claimDailyBonus(usernameLower: string): { ok: boolean; balance: number; error?: string } {
+  /**
+   * Status check-in streak untuk ditampilkan client: apakah hari ini sudah
+   * klaim, dan bila klaim sekarang — streak ke berapa, hari siklus berapa,
+   * dan hadiahnya berapa. Kemarin dihitung dari kunci hari Asia/Jakarta
+   * (zona tanpa DST, jadi now − 24 jam selalu hari kalender sebelumnya).
+   */
+  checkInStatus(usernameLower: string): {
+    claimedToday: boolean;
+    currentStreak: number;
+    nextStreak: number;
+    nextDay: number;
+    nextReward: number;
+  } | null {
     const user = this.db.users[usernameLower];
-    if (!user) return { ok: false, balance: 0, error: "Akun tidak ditemukan." };
-    const today = jakartaDayKey(Date.now());
-    if (user.economy.lastBonusDay === today) {
-      return { ok: false, balance: user.economy.balance, error: "Bonus hari ini sudah diklaim. Kembali lagi besok ya!" };
-    }
-    user.economy.lastBonusDay = today;
-    const balance = this.applyDelta(user, KC_DAILY_BONUS, "Bonus masuk harian");
-    this.save();
-    return { ok: true, balance };
+    if (!user) return null;
+    const eco = user.economy;
+    const now = Date.now();
+    const today = jakartaDayKey(now);
+    const claimedToday = eco.lastBonusDay === today;
+    const yesterday = jakartaDayKey(now - 24 * 60 * 60 * 1000);
+    const nextStreak = claimedToday ? eco.streakCount : eco.lastBonusDay === yesterday ? eco.streakCount + 1 : 1;
+    return {
+      claimedToday,
+      currentStreak: eco.streakCount,
+      nextStreak,
+      nextDay: streakCycleDay(nextStreak),
+      nextReward: streakReward(nextStreak),
+    };
   }
 
-  /** Sisa cooldown satu pekerjaan dalam ms (0 = boleh diambil). */
+  /**
+   * Check-in harian streak (Tahap 6B — menggantikan bonus rata +100 KC):
+   * klaim beruntun menaiki tangga 10/20/30/40/50/60/150 KC; kelewat satu
+   * hari kalender Asia/Jakarta → streak kembali ke Hari 1.
+   */
+  claimCheckIn(usernameLower: string): {
+    ok: boolean;
+    balance: number;
+    reward?: number;
+    streak?: number;
+    streakDay?: number;
+    error?: string;
+  } {
+    const user = this.db.users[usernameLower];
+    if (!user) return { ok: false, balance: 0, error: "Akun tidak ditemukan." };
+    const status = this.checkInStatus(usernameLower)!;
+    if (status.claimedToday) {
+      return { ok: false, balance: user.economy.balance, error: "Check-in hari ini sudah diklaim. Kembali lagi besok ya!" };
+    }
+    user.economy.streakCount = status.nextStreak;
+    user.economy.lastBonusDay = jakartaDayKey(Date.now());
+    const balance = this.applyDelta(user, status.nextReward, `Check-in streak hari ke-${status.nextDay}`);
+    this.save();
+    return { ok: true, balance, reward: status.nextReward, streak: status.nextStreak, streakDay: status.nextDay };
+  }
+
+  /** Sisa cooldown satu pekerjaan dalam ms (0 = boleh diambil) — durasi dari definisi pekerjaan. */
   jobCooldownRemaining(usernameLower: string, jobId: string): number {
     const user = this.db.users[usernameLower];
     if (!user) return 0;
+    const def = JOBS[jobId];
+    if (!def) return 0;
     const last = user.economy.jobLastDone[jobId] ?? 0;
-    return Math.max(0, last + JOB_COOLDOWN_MS - Date.now());
+    return Math.max(0, last + def.cooldownMs - Date.now());
+  }
+
+  /** Hapus cooldown satu pekerjaan (dipakai jalur skip berbayar setelah biaya dibayar). */
+  clearJobCooldown(usernameLower: string, jobId: string) {
+    const user = this.db.users[usernameLower];
+    if (!user) return;
+    if (user.economy.jobLastDone[jobId]) {
+      delete user.economy.jobLastDone[jobId];
+      this.save();
+    }
+  }
+
+  /** Jatah skip cooldown hari ini (reset otomatis saat hari kalender berganti). */
+  skipStatus(usernameLower: string): { used: number; left: number } {
+    const user = this.db.users[usernameLower];
+    if (!user) return { used: 0, left: 0 };
+    const today = jakartaDayKey(Date.now());
+    const used = user.economy.skipDay === today ? user.economy.skipUsed : 0;
+    return { used, left: Math.max(0, MAX_SKIP_PER_DAY - used) };
+  }
+
+  /** Pakai satu attempt skip (dipanggil room HANYA setelah biaya skip berhasil dibayar). */
+  consumeSkip(usernameLower: string): boolean {
+    const user = this.db.users[usernameLower];
+    if (!user) return false;
+    const status = this.skipStatus(usernameLower);
+    if (status.left <= 0) return false;
+    const today = jakartaDayKey(Date.now());
+    if (user.economy.skipDay !== today) {
+      user.economy.skipDay = today;
+      user.economy.skipUsed = 0;
+    }
+    user.economy.skipUsed += 1;
+    this.save();
+    return true;
+  }
+
+  /** Meter kebutuhan hidup tersimpan akun (salinan — ubah lewat setNeeds). */
+  getNeeds(usernameLower: string): NeedsState | null {
+    const user = this.db.users[usernameLower];
+    if (!user) return null;
+    return { ...user.economy.needs };
+  }
+
+  /** Simpan meter kebutuhan hidup akun (dipanggil room berkala & saat pemain keluar). */
+  setNeeds(usernameLower: string, needs: NeedsState) {
+    const user = this.db.users[usernameLower];
+    if (!user) return;
+    const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v * 10) / 10));
+    user.economy.needs = { hunger: clamp(needs.hunger), thirst: clamp(needs.thirst), toilet: clamp(needs.toilet) };
+    this.save();
   }
 
   /**
