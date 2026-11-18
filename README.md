@@ -1,7 +1,7 @@
 # 🏙️ KOTA KITA
 
 Dunia virtual sosial 3D multiplayer berbasis browser, bertema kota Indonesia modern.
-Sudah berjalan: satu Plaza Utama, avatar bisa dikustomisasi (warna, gaya rambut/penutup kepala, baju batik), kontrol sentuh Android, multiplayer real-time, chat, emote, mode foto, siang/malam, akun persisten + teman + moderasi (Tahap 3), paket deploy satu alamat (Tahap 4), **ekonomi Koin Kota (KC)** — saldo akun, bonus harian, dan 3 pekerjaan dalam dunia (Tahap 5), dan **Kampung Kita** — 24 kavling yang bisa diklaim dengan KC serta katalog 3 rumah pribadi yang tersinkron ke semua pemain (Tahap 6).
+Sudah berjalan: satu Plaza Utama, avatar bisa dikustomisasi (warna, gaya rambut/penutup kepala, baju batik), kontrol sentuh Android, multiplayer real-time, chat, emote, mode foto, akun persisten + teman + moderasi (Tahap 3), paket deploy satu alamat (Tahap 4), **ekonomi Koin Kota (KC)** — saldo akun, bonus harian, dan 3 pekerjaan dalam dunia (Tahap 5), **Kampung Kita** — 24 kavling yang bisa diklaim dengan KC serta katalog 3 rumah pribadi yang tersinkron ke semua pemain (Tahap 6), dan **kehidupan warga (Tahap 6B)** — check-in streak beruntun (10–150 KC), 3 meter kebutuhan hidup (lapar/haus/kebelet) dengan jalur isi ulang gratis & berbayar, 3 pekerjaan baru (Petugas Taman, Ojek Makanan, Satpam Malam), cooldown per-pekerjaan, skip cooldown berbayar dengan maks. 2 sif bersamaan, dan siklus siang-malam 24 menit yang diatur server untuk semua pemain.
 
 Dokumen desain ada di folder `docs/`:
 - `game-design.md` — Game Design Document
@@ -9,7 +9,8 @@ Dokumen desain ada di folder `docs/`:
 - `architecture.md` — arsitektur teknis & keputusan
 - `avatar-design.md` — desain avatar
 - `accounts.md` — sistem akun, teman & moderasi (Tahap 3)
-- `economy.md` — ekonomi Koin Kota: aturan KC, 3 pekerjaan, validasi anti-cheat server (Tahap 5)
+- `economy.md` — ekonomi Koin Kota: aturan KC, check-in streak, 6 pekerjaan, cooldown & skip berbayar (Tahap 5 + 6B)
+- `needs.md` — kebutuhan hidup (meter, laju, efek kritis, titik isi ulang) & waktu dunia server (Tahap 6B)
 - `housing.md` — Kampung Kita: denah kavling, harga, aturan klaim/bangun/upgrade, model data & collider dinamis (Tahap 6)
 - `roadmap.md` — rencana tahap berikutnya
 
@@ -80,7 +81,13 @@ Uji beban 50 pemain: server menyala, lalu `cd server && npm run test:load`.
   cd server
   npm run test:economy
   ```
-  Membuktikan saldo awal 500 KC, bonus harian +100 KC (klaim kedua di hari yang sama ditolak), tamu ditolak bonus & pekerjaan, gaji 180 KC dari pekerjaan kebersihan dibayar tepat sekali, cooldown 10 menit ditegakkan server, dan saldo persisten setelah masuk lagi. Detail ekonomi: `docs/economy.md`.
+  Membuktikan saldo awal 500 KC, check-in streak Hari 1 +10 KC (klaim kedua di hari yang sama ditolak), tamu ditolak bonus & pekerjaan, gaji 180 KC dari pekerjaan kebersihan dibayar tepat sekali, cooldown per-pekerjaan ditegakkan server, dan saldo persisten setelah masuk lagi. Detail ekonomi: `docs/economy.md`.
+- **Otomatis (Tahap 6B — streak, kebutuhan, pekerjaan baru, skip, waktu dunia):**
+  ```bash
+  cd server
+  npm run test:6b
+  ```
+  Uji ini mengelola servernya sendiri (port 2578 + folder data sementara + konfigurasi jam `KOTA_TIME_OFFSET_MIN`), jadi tidak perlu server lain menyala. Membuktikan tangga streak (Hari 2 +20, reset +10, Hari 7 +150), meter kebutuhan berkurang hanya saat bermain & semua jalur isi ulang (gratis: air mancur/WC balai kota/masak di rumah; berbayar terpotong tepat), efek kritis server (lari dibatasi & job_start ditolak), 3 pekerjaan baru dibayar tepat (170/220/250 KC), cooldown per-pekerjaan (90/120/150 menit), skip berbayar (biaya terbakar & hangus saat batal, attempt ke-4 ditolak), maks. 2 sif & larangan Kurir+Ojek bersamaan, dan Satpam hanya saat malam server. Detail: `docs/needs.md` & `docs/economy.md`.
 - **Otomatis (perumahan Tahap 6):**
   ```bash
   cd server
