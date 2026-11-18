@@ -134,12 +134,12 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
 
 ## Tahap 9 — Ekspansi & Komunitas
 
-- [ ] Kawasan **Pantai** (dari daftar tunggu Tahap 4) sebagai distrik rekreasi kedua
-- [ ] Sistem ketinggian lantai → **tangga Balai Kota bisa dinaiki** (utang dari Tahap 2) dan atap/balkon bisa dikunjungi
-- [ ] Event terjadwal komunitas (kumpul & foto bersama, parade avatar) memakai Kabar Kota Tahap 8
-- [ ] Quest sosial ringan (kunjungi 3 tempat, sapa 5 pemain, kerja 1 sif) berhadiah KC kecil — tanpa grind
-- [ ] Galeri foto dalam game dari mode foto pemain
-- [ ] Kosmetik musiman bertema Indonesia (HUT RI, Ramadan, tahun baru) — tetap tanpa pay-to-win
+- [x] Kawasan **Pantai** (dari daftar tunggu Tahap 4) sebagai distrik rekreasi kedua
+- [x] Sistem ketinggian lantai → **tangga Balai Kota bisa dinaiki** (utang dari Tahap 2) dan atap/balkon bisa dikunjungi
+- [x] Event terjadwal komunitas (kumpul & foto bersama, parade avatar) memakai Kabar Kota Tahap 8
+- [x] Quest sosial ringan (kunjungi 3 tempat, sapa 5 pemain, kerja 1 sif) berhadiah KC kecil — tanpa grind
+- [x] Galeri foto dalam game dari mode foto pemain
+- [x] Kosmetik musiman bertema Indonesia (HUT RI, Ramadan, tahun baru) — tetap tanpa pay-to-win
 
 **Selesai bila:** setiap sub-fitur di atas lolos uji otomatisnya masing-masing + regresi penuh (2 klien, akun, ekonomi, kavling, usaha, voting) tetap hijau.
 
