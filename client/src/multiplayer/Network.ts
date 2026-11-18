@@ -104,6 +104,43 @@ export interface PlotResult {
   message: string;
 }
 
+// ---------- Usaha Pemain (Tahap 7) ----------
+// Kepemilikan, nama & menu dibaca dari state room (publik); perintah
+// klaim/beli/ambil kas dikirim sebagai pesan dan divalidasi server.
+// Kas usaha & log penjualan TIDAK ada di state — hanya datang lewat
+// pesan privat "lapak_mine" untuk pemiliknya.
+
+export interface LapakItemInfo {
+  price: number;
+  stocked: boolean;
+}
+
+export interface LapakInfo {
+  owner: string;
+  name: string;
+  menu: Map<string, LapakItemInfo>;
+}
+
+export interface LapakSaleInfo {
+  buyer: string;
+  item: string;
+  price: number;
+  ts: number;
+}
+
+/** Data privat lapak milik sesi ini (kas, log penjualan, suvenir) — dari server, hanya untuk pemilik. */
+export interface LapakMine {
+  lapakId: string; // "" = belum punya lapak
+  kas: number;
+  sales: LapakSaleInfo[];
+  souvenirs: number;
+}
+
+export interface LapakResult {
+  ok: boolean;
+  message: string;
+}
+
 /**
  * Alamat server multiplayer:
  *  1. ?server=ws://... di URL (paling fleksibel), atau
@@ -148,6 +185,9 @@ export class Network {
   onNeedsResult: ((result: NeedsResult) => void) | null = null;
   onPlotResult: ((result: PlotResult) => void) | null = null;
   onHomeResult: ((result: PlotResult) => void) | null = null;
+  onLapakResult: ((result: LapakResult) => void) | null = null;
+  onLapakMine: ((mine: LapakMine) => void) | null = null;
+  onLapakEvent: ((message: string) => void) | null = null;
 
   async connect(profile: Profile, token?: string | null): Promise<boolean> {
     try {
@@ -182,6 +222,11 @@ export class Network {
       this.room.onMessage("needs_result", (data: NeedsResult) => this.onNeedsResult?.(data));
       this.room.onMessage("plot_result", (data: PlotResult) => this.onPlotResult?.(data));
       this.room.onMessage("home_result", (data: PlotResult) => this.onHomeResult?.(data));
+      this.room.onMessage("lapak_result", (data: LapakResult) => this.onLapakResult?.(data));
+      this.room.onMessage("lapak_mine", (data: LapakMine) => this.onLapakMine?.(data));
+      this.room.onMessage("lapak_event", (data: { message: string }) => {
+        if (typeof data?.message === "string") this.onLapakEvent?.(data.message);
+      });
       this.room.onLeave(() => {
         this.connected = false;
       });
@@ -217,6 +262,18 @@ export class Network {
   get housesBuilt(): number {
     if (!this.room) return 0;
     return Number((this.room.state as any)?.housesBuilt ?? 0);
+  }
+
+  /** State lapak Pasar dari server: MapSchema lapakId -> { owner, name, menu }. */
+  get lapaks(): Map<string, LapakInfo> | null {
+    if (!this.room) return null;
+    return (this.room.state as any)?.lapaks ?? null;
+  }
+
+  /** Jumlah lapak yang sudah dimiliki warga (dari state server). */
+  get lapaksActive(): number {
+    if (!this.room) return 0;
+    return Number((this.room.state as any)?.lapaksActive ?? 0);
   }
 
   /** Fraksi hari dunia 0..1 dari jam server (Tahap 6B) — sama untuk semua pemain. */
@@ -306,6 +363,31 @@ export class Network {
 
   goHome() {
     if (this.connected && this.room) this.room.send("home", {});
+  }
+
+  // ---------- Usaha Pemain (Tahap 7) ----------
+  claimLapak(lapakId: string) {
+    if (this.connected && this.room) this.room.send("lapak_claim", { lapakId });
+  }
+
+  setLapakName(name: string) {
+    if (this.connected && this.room) this.room.send("lapak_set_name", { name });
+  }
+
+  setLapakItem(itemId: string, price: number, stocked: boolean) {
+    if (this.connected && this.room) this.room.send("lapak_set_item", { itemId, price, stocked });
+  }
+
+  buyLapakItem(lapakId: string, itemId: string) {
+    if (this.connected && this.room) this.room.send("lapak_buy", { lapakId, itemId });
+  }
+
+  collectKas() {
+    if (this.connected && this.room) this.room.send("lapak_collect", {});
+  }
+
+  requestMyLapak() {
+    if (this.connected && this.room) this.room.send("lapak_mine_get", {});
   }
 
   disconnect() {
