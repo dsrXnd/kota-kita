@@ -9,6 +9,7 @@ import {
   HOUSE_PRICE,
 } from "./world/Kampung";
 import { Pasar, LAPAK_BY_ID, LAPAK_PRICE, LAPAK_CATALOG } from "./world/Pasar";
+import { Fasilitas } from "./world/Fasilitas";
 import { Avatar } from "./avatar/Avatar";
 import { ThirdPersonCamera } from "./camera/ThirdPersonCamera";
 import { Joystick } from "./controls/Joystick";
@@ -56,6 +57,8 @@ const kampung = new Kampung();
 scene.add(kampung.group);
 const pasar = new Pasar();
 scene.add(pasar.group);
+const fasilitas = new Fasilitas();
+scene.add(fasilitas.group);
 const allInteractables: Interactable[] = [...plaza.interactables, ...kampung.interactables, ...pasar.interactables];
 const tpCam = new ThirdPersonCamera();
 
@@ -194,6 +197,9 @@ const hud = new HUD({
       openLapakId = currentInteract.id.slice("lapak:".length);
       network.requestMyLapak(); // segarkan kas & log (bila lapakku) dari server
       hud.showLapak(buildLapakView(openLapakId));
+    } else if (currentInteract.id === "pengumuman" && network.connected) {
+      // Papan Pengumuman (Tahap 8) membuka panel kota: Kabar Kota + voting.
+      hud.showCityPanel();
     } else {
       hud.showCard(currentInteract.label, currentInteract.description);
     }
@@ -295,6 +301,12 @@ const hud = new HUD({
   },
   onSetLapakItem: (itemId, price, stocked) => {
     network.setLapakItem(itemId, price, stocked);
+  },
+  onCityOpened: () => {
+    network.requestCity();
+  },
+  onVote: (choice) => {
+    network.castVote(choice);
   },
 });
 
@@ -411,6 +423,21 @@ network.onLapakMine = (mine) => {
 network.onLapakEvent = (message) => {
   hud.toast(message, 4200);
   sound.click();
+};
+
+// Kota Hidup (Tahap 8): panel kota, hasil voting, dan peristiwa besar kota.
+network.onCity = (payload) => hud.renderCity(payload);
+network.onVoteResult = (result) => {
+  hud.toast(result.message, 3800);
+  if (result.ok) sound.click();
+};
+network.onCityEvent = (message) => {
+  hud.toast(message, 5200);
+  sound.click();
+  if (hud.cityPanelOpen) network.requestCity(); // segarkan panel yang sedang terbuka
+};
+network.onNewsUpdate = () => {
+  if (hud.cityPanelOpen) network.requestCity();
 };
 
 /** Susun tampilan panel lapak dari state server + data privat (khusus pemilik). */
@@ -650,8 +677,8 @@ function stepLocalPhysics(dt: number) {
     selfPos.z *= push;
   }
 
-  // Tabrakan bangunan (sama seperti server) + rumah pemain & meja lapak (Tahap 6 + 7).
-  resolveCollisions(selfPos, [...kampung.houseColliders(), ...pasar.stallColliders()]);
+  // Tabrakan bangunan (sama seperti server) + rumah pemain, meja lapak & fasilitas kota (Tahap 6 + 7 + 8).
+  resolveCollisions(selfPos, [...kampung.houseColliders(), ...pasar.stallColliders(), ...fasilitas.colliders()]);
 
   // Suara langkah kaki mengikuti jarak tempuh di tanah.
   if (moving && selfPos.y <= 0) {
@@ -850,6 +877,9 @@ renderer.setAnimationLoop(() => {
         // Pasar (Tahap 7): terapkan state lapak terbaru; segarkan panel —
         // KECUALI pemilik sedang mengetik di panel (jangan ganggu inputnya).
         pasar.sync(network.lapaks as any);
+        // Fasilitas kota (Tahap 8): bangun/bongkar model sesuai state server —
+        // fasilitas yang baru lolos voting langsung tampil di tengah sesi.
+        fasilitas.sync(network.facilities);
         if (openLapakId && hud.lapakPanelOpen) {
           const active = document.activeElement;
           const typing =
