@@ -130,6 +130,60 @@ export function voteWindowText(): string {
   return `${m} menit`;
 }
 
+// ---------- Event Komunitas (Tahap 9) ----------
+
+export interface CommunityEventDef {
+  type: string;
+  name: string;
+  icon: string;
+  /** Pusat zona kehadiran (meter dunia). */
+  x: number;
+  z: number;
+  radius: number;
+}
+
+/**
+ * Dua event bergantian menurut indeks siklus: genap = kumpul & foto di
+ * air mancur plaza; ganjil = parade avatar di tengah plaza. Event TIDAK
+ * memberi KC — jalur hadiah harian adalah quest sosial (Tahap 9).
+ */
+export const COMMUNITY_EVENTS: ReadonlyArray<CommunityEventDef> = [
+  { type: "foto", name: "Kumpul & Foto Bersama", icon: "📸", x: 0, z: 0, radius: 8 },
+  { type: "parade", name: "Parade Avatar", icon: "🎉", x: 0, z: 0, radius: 15 },
+];
+
+/**
+ * Panjang satu siklus event dalam ms: bawaan 30 menit asli. Bisa diatur
+ * lewat KOTA_EVENT_MINUTES (desimal diperbolehkan) — HANYA konfigurasi
+ * saat server menyala untuk pengujian; bukan endpoint curang.
+ */
+export function eventCycleMs(): number {
+  const m = Number(process.env.KOTA_EVENT_MINUTES);
+  return (Number.isFinite(m) && m > 0 ? m : 30) * 60 * 1000;
+}
+
+/** Jendela aktif event: 1/6 awal siklus (bawaan 5 dari 30 menit), minimum 3 detik. */
+export function eventActiveMs(): number {
+  return Math.max(3000, eventCycleMs() / 6);
+}
+
+export interface ActiveCommunityEvent {
+  def: CommunityEventDef;
+  cycleIndex: number;
+  endsAt: number;
+}
+
+/** Event yang sedang aktif pada waktu tertentu (null = di luar jendela aktif). */
+export function currentCommunityEvent(now = Date.now()): ActiveCommunityEvent | null {
+  const cycle = eventCycleMs();
+  const cycleIndex = Math.floor(now / cycle);
+  const cycleStart = cycleIndex * cycle;
+  const activeMs = eventActiveMs();
+  if (now - cycleStart >= activeMs) return null;
+  const def = COMMUNITY_EVENTS[Math.abs(cycleIndex) % COMMUNITY_EVENTS.length];
+  return { def, cycleIndex, endsAt: cycleStart + activeMs };
+}
+
 // ---------- Penyimpanan kota (persisten, pola sama seperti plots.json) ----------
 
 export interface NewsEntry {
