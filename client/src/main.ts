@@ -182,9 +182,14 @@ const hud = new HUD({
     }
   },
   onPhoto: () => takePhoto(),
-  onDayNight: (night) => {
-    plaza.setNight(night);
-    hud.toast(night ? "Selamat malam 🌙 Lampu plaza menyala." : "Selamat pagi ☀️");
+  onDayNightInfo: () => {
+    hud.toast(
+      network.connected
+        ? network.worldIsNight
+          ? "🌙 Sedang malam server — waktu dunia diatur server & sama untuk semua pemain (1 hari game = 24 menit)."
+          : "☀️ Sedang siang server — waktu dunia diatur server & sama untuk semua pemain (1 hari game = 24 menit)."
+        : "Waktu dunia diatur server saat kamu online (1 hari game = 24 menit)."
+    );
   },
   onChat: (text) => {
     sound.pop();
@@ -233,8 +238,18 @@ const hud = new HUD({
   onStartJob: (jobId) => {
     network.startJob(jobId);
   },
-  onCancelJob: () => {
-    network.cancelJob();
+  onCancelJob: (jobId) => {
+    network.cancelJob(jobId);
+  },
+  onSkipJob: (jobId) => {
+    network.skipJob(jobId);
+  },
+  onRefill: (action) => {
+    if (!network.connected) {
+      hud.toast("Sedang offline — isi ulang kebutuhan butuh koneksi ke server.");
+      return;
+    }
+    network.refillNeed(action);
   },
   onHome: () => {
     if (!network.connected) {
@@ -285,6 +300,40 @@ network.onJobUpdate = (update) => {
   } else if (update.message) {
     hud.toast(update.message, 3200);
   }
+};
+network.onSkipResult = (ok, message) => {
+  hud.toast(message, 4200);
+  if (ok) sound.click();
+  network.requestJobs(); // segarkan cooldown & jatah skip dari server
+};
+
+// Kebutuhan hidup (Tahap 6B): meter dari server; peringatan saat meter
+// menembus ambang 25% dan saat kosong (efek kritis) — sekali per penembusan.
+let lastNeeds: { hunger: number; thirst: number; toilet: number } | null = null;
+const warnedMeters = new Set<string>();
+network.onNeeds = (needs) => {
+  hud.renderNeeds(needs);
+  const meters: Array<[string, number, string]> = [
+    ["hunger", needs.hunger, "🍗 Laparmu"],
+    ["thirst", needs.thirst, "💧 Hausmu"],
+    ["toilet", needs.toilet, "🚽 Kebeletmu"],
+  ];
+  for (const [key, value, label] of meters) {
+    if (value <= 0 && lastNeeds && (lastNeeds as any)[key] > 0) {
+      hud.toast(`${label} KRITIS — kamu tidak bisa lari & mulai sif sampai teratasi. Ada jalur gratis di panel 💼!`, 4600);
+      warnedMeters.add(key);
+    } else if (value <= needs.warnAt && !warnedMeters.has(key) && lastNeeds && (lastNeeds as any)[key] > needs.warnAt) {
+      hud.toast(`${label} tinggal ${Math.round(value)}% — isi ulang lewat panel 💼 (ada yang gratis!).`, 3800);
+      warnedMeters.add(key);
+    } else if (value > needs.warnAt + 5) {
+      warnedMeters.delete(key);
+    }
+  }
+  lastNeeds = { hunger: needs.hunger, thirst: needs.thirst, toilet: needs.toilet };
+};
+network.onNeedsResult = (result) => {
+  hud.toast(result.message, 3400);
+  if (result.ok) sound.click();
 };
 
 // Perumahan (Tahap 6): hasil perintah kavling dari server + teleport pulang.
@@ -419,6 +468,10 @@ async function startGame(p: Profile, auth: AuthIntent) {
     // Ekonomi: ambil saldo & status pekerjaan dari server (tamu: chip "—").
     if (accountName) network.requestJobs();
     else hud.setBalance(null);
+    // Kebutuhan hidup & jam dunia dari server (Tahap 6B).
+    network.requestNeeds();
+    plaza.setNight(network.worldIsNight);
+    hud.setWorldIndicator(network.worldIsNight);
     refreshNearby();
   } else {
     hud.setStatus("Offline — server belum menyala, mode sendiri", false);
@@ -462,7 +515,11 @@ function stepLocalPhysics(dt: number) {
   if (move.length() > 1) move.normalize();
 
   const moving = move.length() > 0.05;
-  const speed = input.sprint ? RUN_SPEED : WALK_SPEED;
+  // Cermin efek kritis server (Tahap 6B): meter kosong → lari dimatikan.
+  const needsCritical =
+    !!lastNeeds && (lastNeeds.hunger <= 0 || lastNeeds.thirst <= 0 || lastNeeds.toilet <= 0);
+  const sprinting = input.sprint && !needsCritical;
+  const speed = sprinting ? RUN_SPEED : WALK_SPEED;
   if (moving) {
     selfPos.addScaledVector(move, speed * dt);
     selfRotY = Math.atan2(move.x, move.z);
@@ -533,7 +590,7 @@ function stepLocalPhysics(dt: number) {
     if (emoteName === "sit" && moving) emoteUntilMs = 0; // duduk batal saat bergerak
     if (performance.now() < emoteUntilMs && selfPos.y <= 0.05) anim = emoteName;
     else if (selfPos.y > 0.05) anim = "jump";
-    else if (moving) anim = input.sprint ? "run" : "walk";
+    else if (moving) anim = sprinting ? "run" : "walk";
     selfAvatar.update(dt, anim);
   }
 }
@@ -678,8 +735,10 @@ renderer.setAnimationLoop(() => {
       countTimer = 0;
       hud.setPlayerCount(network.connected ? network.playerCount : 1);
       refreshNearby();
-      // Kampung Kita: terapkan state kavling terbaru dari server (pemilik & rumah).
+      // Waktu dunia (Tahap 6B): langit mengikuti jam server, sama untuk semua.
       if (network.connected) {
+        plaza.setNight(network.worldIsNight);
+        hud.setWorldIndicator(network.worldIsNight);
         kampung.sync(network.plots as any);
         if (openPlotId && hud.plotPanelOpen) hud.showPlot(buildPlotView(openPlotId));
       }

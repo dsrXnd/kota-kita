@@ -513,24 +513,19 @@ body {
   border-radius: 12px;
   padding: 10px 12px;
 }
-#jobs-active-title {
-  font-weight: 800;
-  color: #20303f;
-  font-size: 14px;
+.active-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
 }
-#jobs-active-progress {
-  font-size: 14px;
-  color: #40505c;
-  margin: 4px 0 8px;
+.active-row .grow {
+  flex: 1;
+  min-width: 0;
 }
-#btn-job-cancel {
-  padding: 8px 14px;
-  border: 2px solid #c0392b;
-  border-radius: 999px;
-  background: #fff;
+.active-row .mini-btn {
+  border-color: #c0392b;
   color: #c0392b;
-  font-weight: 700;
-  cursor: pointer;
 }
 .job-row {
   display: flex;
@@ -556,6 +551,101 @@ body {
 .job-row .mini-btn:disabled {
   opacity: 0.55;
   cursor: default;
+}
+.skip-btn {
+  border-color: #e3b23c !important;
+  background: #fdf3d8 !important;
+  color: #7a5b00 !important;
+  font-weight: 800;
+}
+
+/* ---------- Kebutuhan hidup (Tahap 6B) ---------- */
+#needs-strip {
+  position: fixed;
+  top: calc(58px + env(safe-area-inset-top));
+  left: calc(10px + env(safe-area-inset-left));
+  z-index: 40;
+  display: flex;
+  gap: 10px;
+  background: rgba(255, 253, 247, 0.88);
+  border-radius: 999px;
+  padding: 5px 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+.ns-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 14px;
+}
+.ns-bar {
+  display: inline-block;
+  width: 52px;
+  height: 8px;
+  border-radius: 999px;
+  background: #e5ddc9;
+  overflow: hidden;
+}
+.ns-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: #57b25e;
+  transition: width 0.6s ease;
+}
+.ns-fill.low,
+.need-fill.low {
+  background: #e39a3c;
+}
+.ns-fill.crit,
+.need-fill.crit {
+  background: #d64545;
+}
+#needs-box {
+  margin-bottom: 6px;
+}
+.need-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  color: #20303f;
+}
+.need-label {
+  width: 74px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.need-bar {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: #eee5d3;
+  overflow: hidden;
+}
+.need-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: #57b25e;
+  transition: width 0.6s ease;
+}
+.need-val {
+  width: 28px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+}
+#needs-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+#needs-actions .mini-btn {
+  font-size: 12px;
 }
 #btn-jobs-close {
   width: 100%;
