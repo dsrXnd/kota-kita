@@ -6,6 +6,7 @@ import type {
   ShiftInfo,
   NeedsInfo,
   LapakSaleInfo,
+  CityPayload,
 } from "../multiplayer/Network";
 
 export interface AuthIntent {
@@ -112,6 +113,8 @@ export interface HudCallbacks {
   onCollectKas: () => void;
   onSetLapakName: (name: string) => void;
   onSetLapakItem: (itemId: string, price: number, stocked: boolean) => void;
+  onCityOpened: () => void;
+  onVote: (choice: "yes" | "no") => void;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -185,6 +188,8 @@ export class HUD {
   private cb: HudCallbacks;
   private toastTimer = 0;
   private jobsTimer = 0;
+  private cityTimer = 0;
+  private lastCity: CityPayload | null = null;
   private lastJobs: JobsPayload | null = null;
   private activeShifts: ShiftInfo[] = [];
   private lastNeeds: NeedsInfo | null = null;
@@ -342,6 +347,16 @@ export class HUD {
     // Usaha Pemain (Tahap 7): panel lapak.
     el<HTMLButtonElement>("btn-lapak-close").addEventListener("click", () => {
       el("lapak-panel").classList.add("hidden");
+    });
+
+    // Kota Hidup (Tahap 8): panel kota (statistik + kabar + voting) dibuka
+    // dari tiga tombol bar atas maupun Papan Pengumuman di plaza.
+    for (const btnId of ["btn-stats", "btn-news", "btn-vote"]) {
+      el<HTMLButtonElement>(btnId).addEventListener("click", () => this.showCityPanel());
+    }
+    el<HTMLButtonElement>("btn-city-close").addEventListener("click", () => {
+      el("city-panel").classList.add("hidden");
+      window.clearInterval(this.cityTimer);
     });
 
     // Chat.
@@ -834,6 +849,141 @@ export class HUD {
 
   hideLapak() {
     el("lapak-panel").classList.add("hidden");
+  }
+
+  // ---------- Kota Hidup (Tahap 8) ----------
+  get cityPanelOpen(): boolean {
+    return !el("city-panel").classList.contains("hidden");
+  }
+
+  /** Buka panel kota & minta data terbaru dari server; hitung mundur voting disegarkan tiap detik. */
+  showCityPanel() {
+    el("city-panel").classList.remove("hidden");
+    this.cb.onCityOpened();
+    window.clearInterval(this.cityTimer);
+    this.cityTimer = window.setInterval(() => this.renderCityCountdown(), 1000);
+  }
+
+  hideCity() {
+    el("city-panel").classList.add("hidden");
+    window.clearInterval(this.cityTimer);
+  }
+
+  private formatRemaining(closesAt: number): string {
+    const left = Math.max(0, closesAt - Date.now());
+    const totalSec = Math.ceil(left / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) return `⏳ Ditutup dalam ±${h} jam ${m} menit`;
+    if (m > 0) return `⏳ Ditutup dalam ±${m} menit ${s} detik`;
+    return `⏳ Ditutup dalam ±${s} detik`;
+  }
+
+  private renderCityCountdown() {
+    const node = document.getElementById("city-vote-time");
+    if (node && this.lastCity?.vote) node.textContent = this.formatRemaining(this.lastCity.vote.closesAt);
+  }
+
+  /** Gambar panel kota dari payload server: statistik, voting (tally langsung), dan Kabar Kota. */
+  renderCity(payload: CityPayload) {
+    this.lastCity = payload;
+    el("city-stats").textContent = [
+      `👥 Penduduk terdaftar: ${payload.residents} warga`,
+      `🟢 Warga online sekarang: ${payload.online}`,
+      `🏠 Rumah berdiri: ${payload.houses}`,
+      `🏪 Lapak aktif: ${payload.lapaks}`,
+      `🏦 Kas Kota: 🪙 ${payload.kasKota} KC`,
+    ].join("\n");
+
+    // --- Voting ---
+    const voteBox = el("city-vote");
+    voteBox.innerHTML = "";
+    if (payload.lastResult) {
+      const r = payload.lastResult;
+      const line = document.createElement("p");
+      line.className = "city-last-result";
+      line.textContent = r.passed
+        ? `Hasil terakhir: ${r.icon} ${r.name} LOLOS ✅ (setuju ${r.yes} · tolak ${r.no})`
+        : `Hasil terakhir: ${r.icon} ${r.name} belum lolos ❌ (setuju ${r.yes} · tolak ${r.no})`;
+      voteBox.appendChild(line);
+    }
+    const v = payload.vote;
+    if (!v) {
+      const p = document.createElement("p");
+      p.className = "city-vote-desc";
+      p.textContent =
+        payload.facilities.length >= 3
+          ? "Semua fasilitas usulan sudah terbangun. Terima kasih sudah ikut membangun kota! 🎉"
+          : "Saat ini tidak ada usulan yang sedang divoting.";
+      voteBox.appendChild(p);
+    } else {
+      const title = document.createElement("div");
+      title.className = "city-vote-title";
+      title.textContent = `${v.icon} ${v.name}`;
+      const desc = document.createElement("p");
+      desc.className = "city-vote-desc";
+      desc.textContent = v.desc;
+      const tally = document.createElement("p");
+      tally.className = "city-vote-tally";
+      tally.textContent = `Setuju ${v.yes} · Tolak ${v.no} — lolos bila setuju ≥ ${v.minYes} dan lebih banyak dari menolak.`;
+      const time = document.createElement("p");
+      time.className = "city-vote-time";
+      time.id = "city-vote-time";
+      time.textContent = this.formatRemaining(v.closesAt);
+      voteBox.append(title, desc, tally, time);
+
+      if (payload.guest) {
+        const note = document.createElement("p");
+        note.className = "city-vote-note";
+        note.textContent = "Kamu masuk sebagai tamu — voting hanya untuk warga yang masuk dengan akun. Daftar dulu ya!";
+        voteBox.appendChild(note);
+      } else if (v.myVote) {
+        const note = document.createElement("p");
+        note.className = "city-vote-note";
+        note.textContent = `Kamu sudah memilih: ${v.myVote === "yes" ? "SETUJU ✅" : "TOLAK ❌"} — suara bersifat final.`;
+        voteBox.appendChild(note);
+      } else {
+        const row = document.createElement("div");
+        row.className = "city-vote-btns";
+        const yesBtn = document.createElement("button");
+        yesBtn.className = "city-vote-btn yes";
+        yesBtn.textContent = "✅ Setuju";
+        yesBtn.addEventListener("click", () => this.cb.onVote("yes"));
+        const noBtn = document.createElement("button");
+        noBtn.className = "city-vote-btn no";
+        noBtn.textContent = "❌ Tolak";
+        noBtn.addEventListener("click", () => this.cb.onVote("no"));
+        row.append(yesBtn, noBtn);
+        voteBox.appendChild(row);
+      }
+    }
+
+    // --- Kabar Kota (terbaru di depan) ---
+    const newsBox = el("city-news");
+    newsBox.innerHTML = "";
+    if (payload.news.length === 0) {
+      newsBox.innerHTML = `<p class="city-news-empty">Belum ada kabar. Peristiwa kota akan tercatat di sini.</p>`;
+    } else {
+      for (const entry of payload.news) {
+        const row = document.createElement("div");
+        row.className = "city-news-row";
+        const when = new Date(entry.ts).toLocaleString("id-ID", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const text = document.createElement("span");
+        text.className = "grow";
+        text.textContent = `${entry.icon} ${entry.text}`;
+        const time = document.createElement("span");
+        time.className = "city-news-time";
+        time.textContent = when;
+        row.append(text, time);
+        newsBox.appendChild(row);
+      }
+    }
   }
 
   // ---------- Umum ----------
