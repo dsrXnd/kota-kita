@@ -1,4 +1,12 @@
-import type { Profile, FriendInfo, JobsPayload, JobUpdate, ShiftInfo, NeedsInfo } from "../multiplayer/Network";
+import type {
+  Profile,
+  FriendInfo,
+  JobsPayload,
+  JobUpdate,
+  ShiftInfo,
+  NeedsInfo,
+  LapakSaleInfo,
+} from "../multiplayer/Network";
 
 export interface AuthIntent {
   mode: "login" | "register" | "guest" | "account";
@@ -41,6 +49,39 @@ export interface PlotView {
   tiers: PlotTierOption[];
 }
 
+// ---------- Usaha Pemain (Tahap 7) ----------
+// Menu & harga berasal dari state server; kas & log penjualan hanya ada di
+// tampilan pemilik (data privat dari pesan server). HUD hanya menggambar.
+
+export interface LapakItemView {
+  id: string;
+  name: string;
+  effectText: string;
+  price: number;
+  minPrice: number;
+  maxPrice: number;
+  stocked: boolean;
+}
+
+export interface LapakView {
+  lapakId: string;
+  title: string;
+  owner: string; // "" = kosong
+  lapakName: string; // "" = belum diklaim
+  isMine: boolean;
+  canClaim: boolean;
+  /** Saldo sesi ini (null = tamu/offline) — untuk menonaktifkan tombol Beli. */
+  balance: number | null;
+  note: string;
+  items: LapakItemView[];
+  /** Khusus pemilik (data privat server): kas usaha saat ini. */
+  kas: number;
+  /** Khusus pemilik: penjualan terakhir. */
+  sales: LapakSaleInfo[];
+  /** Khusus pemilik: total suvenir batik yang ia kumpulkan sebagai pembeli. */
+  souvenirs: number;
+}
+
 export interface HudCallbacks {
   onStart: (profile: Profile, auth: AuthIntent) => void;
   onLogout: () => void;
@@ -66,6 +107,11 @@ export interface HudCallbacks {
   onHome: () => void;
   onClaimPlot: (plotId: string) => void;
   onBuildHouse: (tier: number) => void;
+  onClaimLapak: (lapakId: string) => void;
+  onBuyLapakItem: (lapakId: string, itemId: string) => void;
+  onCollectKas: () => void;
+  onSetLapakName: (name: string) => void;
+  onSetLapakItem: (itemId: string, price: number, stocked: boolean) => void;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -291,6 +337,11 @@ export class HUD {
     el<HTMLButtonElement>("btn-home").addEventListener("click", () => this.cb.onHome());
     el<HTMLButtonElement>("btn-plot-close").addEventListener("click", () => {
       el("plot-panel").classList.add("hidden");
+    });
+
+    // Usaha Pemain (Tahap 7): panel lapak.
+    el<HTMLButtonElement>("btn-lapak-close").addEventListener("click", () => {
+      el("lapak-panel").classList.add("hidden");
     });
 
     // Chat.
@@ -620,6 +671,169 @@ export class HUD {
 
   hidePlot() {
     el("plot-panel").classList.add("hidden");
+  }
+
+  // ---------- Usaha Pemain (Tahap 7) ----------
+  get lapakPanelOpen(): boolean {
+    return !el("lapak-panel").classList.contains("hidden");
+  }
+
+  /** Gambar panel lapak: tampilan klaim / pembeli / pemilik sesuai LapakView dari main.ts. */
+  showLapak(view: LapakView) {
+    el("lapak-title").textContent = `🏪 ${view.title}`;
+    const lines = view.owner
+      ? [
+          `Nama lapak: ${view.lapakName}`,
+          `Pemilik: @${view.owner}${view.isMine ? " (kamu)" : ""}`,
+        ]
+      : ["Status: masih kosong — belum ada pemiliknya."];
+    el("lapak-info").textContent = lines.join("\n");
+
+    const box = el("lapak-actions");
+    box.innerHTML = "";
+    if (view.note) {
+      const note = document.createElement("p");
+      note.className = "lapak-note";
+      note.textContent = view.note;
+      box.appendChild(note);
+    }
+
+    if (view.canClaim) {
+      const btn = document.createElement("button");
+      btn.className = "lapak-action-btn";
+      btn.textContent = "🪙 Klaim lapak ini — 10.000 KC";
+      btn.addEventListener("click", () => this.cb.onClaimLapak(view.lapakId));
+      box.appendChild(btn);
+    }
+
+    // --- Tampilan pembeli: menu lapak orang lain ---
+    if (view.owner && !view.isMine) {
+      for (const item of view.items) {
+        const row = document.createElement("div");
+        row.className = "lapak-item-row";
+        const info = document.createElement("div");
+        info.className = "lapak-item-info";
+        const name = document.createElement("div");
+        name.className = "lapak-item-name";
+        name.textContent = `${item.name} — 🪙 ${item.price} KC`;
+        const sub = document.createElement("div");
+        sub.className = "lapak-item-sub";
+        sub.textContent = item.stocked ? item.effectText : "Stok sedang ditutup pemilik";
+        info.append(name, sub);
+        row.appendChild(info);
+        const btn = document.createElement("button");
+        btn.className = "mini-btn";
+        if (!item.stocked) {
+          btn.textContent = "Habis";
+          btn.disabled = true;
+        } else if (view.balance === null) {
+          btn.textContent = "Perlu akun";
+          btn.disabled = true;
+        } else if (view.balance < item.price) {
+          btn.textContent = "Saldo kurang";
+          btn.disabled = true;
+        } else {
+          btn.textContent = "Beli";
+          btn.addEventListener("click", () => this.cb.onBuyLapakItem(view.lapakId, item.id));
+        }
+        row.appendChild(btn);
+        box.appendChild(row);
+      }
+    }
+
+    // --- Tampilan pemilik: kas, nama, harga & stok, log penjualan ---
+    if (view.isMine) {
+      const kasBtn = document.createElement("button");
+      kasBtn.className = "lapak-action-btn";
+      kasBtn.textContent =
+        view.kas > 0 ? `💰 Ambil Kas Usaha — 🪙 ${view.kas} KC` : "💰 Kas usaha masih kosong";
+      kasBtn.disabled = view.kas <= 0;
+      kasBtn.addEventListener("click", () => this.cb.onCollectKas());
+      box.appendChild(kasBtn);
+
+      const nameInput = document.createElement("input");
+      nameInput.className = "lapak-name-input";
+      nameInput.maxLength = 20;
+      nameInput.placeholder = "Nama lapak (maks. 20 huruf)";
+      nameInput.value = view.lapakName;
+      box.appendChild(nameInput);
+      const nameBtn = document.createElement("button");
+      nameBtn.className = "lapak-action-btn";
+      nameBtn.textContent = "✏️ Simpan Nama Lapak";
+      nameBtn.addEventListener("click", () => {
+        const v = nameInput.value.trim();
+        if (v) this.cb.onSetLapakName(v);
+      });
+      box.appendChild(nameBtn);
+
+      for (const item of view.items) {
+        const row = document.createElement("div");
+        row.className = "lapak-item-row";
+        const info = document.createElement("div");
+        info.className = "lapak-item-info";
+        const name = document.createElement("div");
+        name.className = "lapak-item-name";
+        name.textContent = item.name;
+        const sub = document.createElement("div");
+        sub.className = "lapak-item-sub";
+        sub.textContent = `${item.effectText} · harga sah ${item.minPrice}–${item.maxPrice} KC`;
+        info.append(name, sub);
+        row.appendChild(info);
+
+        const priceInput = document.createElement("input");
+        priceInput.className = "lapak-price-input";
+        priceInput.type = "number";
+        priceInput.min = String(item.minPrice);
+        priceInput.max = String(item.maxPrice);
+        priceInput.value = String(item.price);
+        row.appendChild(priceInput);
+
+        const stockBtn = document.createElement("button");
+        stockBtn.className = "mini-btn";
+        stockBtn.textContent = item.stocked ? "✅ Dijual" : "🚫 Tutup";
+        let stocked = item.stocked;
+        stockBtn.addEventListener("click", () => {
+          stocked = !stocked;
+          stockBtn.textContent = stocked ? "✅ Dijual" : "🚫 Tutup";
+        });
+        row.appendChild(stockBtn);
+
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "mini-btn";
+        saveBtn.textContent = "Simpan";
+        saveBtn.addEventListener("click", () => {
+          const price = Number(priceInput.value);
+          if (!Number.isFinite(price)) return;
+          this.cb.onSetLapakItem(item.id, price, stocked);
+        });
+        row.appendChild(saveBtn);
+        box.appendChild(row);
+      }
+
+      const salesTitle = document.createElement("div");
+      salesTitle.className = "lapak-sales-title";
+      salesTitle.textContent = `🧾 Penjualan terakhir · 🎁 Suvenir batikmu: ${view.souvenirs}`;
+      box.appendChild(salesTitle);
+      const salesBox = document.createElement("div");
+      salesBox.className = "lapak-sales";
+      if (view.sales.length === 0) {
+        salesBox.textContent = "Belum ada penjualan. Ajak warga mampir ke lapakmu!";
+      } else {
+        const itemName = (id: string) => view.items.find((i) => i.id === id)?.name ?? id;
+        salesBox.textContent = [...view.sales]
+          .reverse()
+          .map((s) => `• @${s.buyer} membeli ${itemName(s.item)} — 🪙 ${s.price} KC`)
+          .join("\n");
+        salesBox.style.whiteSpace = "pre-line";
+      }
+      box.appendChild(salesBox);
+    }
+
+    el("lapak-panel").classList.remove("hidden");
+  }
+
+  hideLapak() {
+    el("lapak-panel").classList.add("hidden");
   }
 
   // ---------- Umum ----------
