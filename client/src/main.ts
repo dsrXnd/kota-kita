@@ -10,6 +10,17 @@ import {
 } from "./world/Kampung";
 import { Pasar, LAPAK_BY_ID, LAPAK_PRICE, LAPAK_CATALOG } from "./world/Pasar";
 import { Fasilitas } from "./world/Fasilitas";
+import { Pantai } from "./world/Pantai";
+import {
+  BOUND_MAX_X,
+  BOUND_MAX_Z,
+  BOUND_MIN_X,
+  BOUND_MIN_Z,
+  STEP_UP,
+  WORLD_BOXES,
+  floorHeight,
+} from "./world/Heights";
+import { savePhoto } from "./interface/Gallery";
 import { Avatar } from "./avatar/Avatar";
 import { ThirdPersonCamera } from "./camera/ThirdPersonCamera";
 import { Joystick } from "./controls/Joystick";
@@ -17,6 +28,7 @@ import { InputManager } from "./controls/InputManager";
 import { Network, type Profile } from "./multiplayer/Network";
 import {
   fetchMe,
+  fetchSeason,
   loginAccount,
   registerAccount,
   savedToken,
@@ -32,11 +44,8 @@ const WALK_SPEED = 4;
 const RUN_SPEED = 7;
 const GRAVITY = 22;
 const JUMP_VELOCITY = 8.2;
-// Batas dunia persegi panjang — HARUS sama dengan server (KotaRoom.ts).
-const BOUND_MIN_X = -42;
-const BOUND_MAX_X = 136;
-const BOUND_MIN_Z = -42;
-const BOUND_MAX_Z = 70;
+// Batas dunia & zona ketinggian hidup di world/Heights.ts (Tahap 9) —
+// cermin persis server (server/src/world/world.ts).
 const FOUNTAIN_RADIUS = 3.6;
 
 // ---------- Renderer & scene ----------
@@ -59,7 +68,14 @@ const pasar = new Pasar();
 scene.add(pasar.group);
 const fasilitas = new Fasilitas();
 scene.add(fasilitas.group);
-const allInteractables: Interactable[] = [...plaza.interactables, ...kampung.interactables, ...pasar.interactables];
+const pantai = new Pantai();
+scene.add(pantai.group);
+const allInteractables: Interactable[] = [
+  ...plaza.interactables,
+  ...kampung.interactables,
+  ...pasar.interactables,
+  ...pantai.interactables,
+];
 const tpCam = new ThirdPersonCamera();
 
 // ---------- Kontrol ----------
@@ -400,7 +416,7 @@ network.onHomeResult = (result) => {
     // Jepret posisi lokal ke posisi resmi server (teleport, bukan lerp pelan).
     const self = network.players?.get(network.sessionId);
     if (self) {
-      selfPos.set(Number(self.x) || 0, 0, Number(self.z) || 0);
+      selfPos.set(Number(self.x) || 0, Number(self.y) || 0, Number(self.z) || 0);
       selfVy = 0;
       tpCam.snapBehind(selfPos);
     }
@@ -438,6 +454,19 @@ network.onCityEvent = (message) => {
 };
 network.onNewsUpdate = () => {
   if (hud.cityPanelOpen) network.requestCity();
+};
+
+// Quest Sosial Harian (Tahap 9): kemajuan & hadiah dari server.
+network.onQuestUpdate = (update) => {
+  hud.renderQuests(update.quests ?? []);
+  if (update.message) {
+    hud.toast(update.message, update.reward ? 4200 : 3000);
+    if (update.reward) sound.click();
+  }
+  if (update.balance !== undefined) {
+    lastBalance = update.balance;
+    hud.setBalance(update.balance);
+  }
 };
 
 /** Susun tampilan panel lapak dari state server + data privat (khusus pemilik). */
@@ -612,6 +641,12 @@ async function startGame(p: Profile, auth: AuthIntent) {
   }
 }
 
+// Musim kosmetik (Tahap 9): tanya server musim apa yang aktif agar editor
+// avatar di layar mulai bisa menawarkan gaya musimannya (server otoritas).
+void fetchSeason().then((season) => {
+  hud.setSeason(season?.style ?? "", season?.label ?? "");
+});
+
 // Sesi tersimpan? Muat profil akun ke layar mulai secara otomatis.
 if (savedToken()) {
   void fetchMe().then((info) => {
@@ -625,6 +660,16 @@ if (savedToken()) {
 
 function takePhoto() {
   renderer.render(scene, camera);
+  // Galeri perangkat (Tahap 9): simpan juga ke IndexedDB perangkat ini
+  // (data URL) — fail-soft; unduhan di bawah tetap jalan apa pun hasilnya.
+  try {
+    const dataUrl = canvas.toDataURL("image/png");
+    void savePhoto(dataUrl).then((ok) => {
+      if (ok) hud.toast("Foto tersimpan 📸 — unduhan terkirim & salinannya ada di galeri 🖼️ perangkat ini.");
+    });
+  } catch {
+    /* IndexedDB tidak tersedia: unduhan tetap jalan. */
+  }
   canvas.toBlob((blob) => {
     if (!blob) return;
     const url = URL.createObjectURL(blob);
@@ -658,14 +703,21 @@ function stepLocalPhysics(dt: number) {
     selfRotY = Math.atan2(move.x, move.z);
   }
 
-  if (input.consumeJump() && selfPos.y <= 0) selfVy = JUMP_VELOCITY;
-  if (selfPos.y > 0 || selfVy !== 0) {
+  // Lantai bertingkat (Tahap 9) — cermin persis logika server: menapak
+  // mengikuti lantai efektif (naik/turun ramp), melangkah keluar tepi
+  // dek = jatuh oleh gravitasi, lompat relatif ke lantai setempat.
+  const ground = floorHeight(selfPos.x, selfPos.z, selfPos.y);
+  if (input.consumeJump() && selfPos.y <= ground + 0.01) selfVy = JUMP_VELOCITY;
+  if (selfVy !== 0 || selfPos.y - ground > STEP_UP) {
     selfPos.y += selfVy * dt;
     selfVy -= GRAVITY * dt;
-    if (selfPos.y <= 0) {
-      selfPos.y = 0;
+    const landing = floorHeight(selfPos.x, selfPos.z, selfPos.y);
+    if (selfPos.y <= landing) {
+      selfPos.y = landing;
       selfVy = 0;
     }
+  } else {
+    selfPos.y = ground;
   }
 
   selfPos.x = THREE.MathUtils.clamp(selfPos.x, BOUND_MIN_X, BOUND_MAX_X);
@@ -677,11 +729,18 @@ function stepLocalPhysics(dt: number) {
     selfPos.z *= push;
   }
 
-  // Tabrakan bangunan (sama seperti server) + rumah pemain, meja lapak & fasilitas kota (Tahap 6 + 7 + 8).
-  resolveCollisions(selfPos, [...kampung.houseColliders(), ...pasar.stallColliders(), ...fasilitas.colliders()]);
+  // Tabrakan bangunan (sama seperti server) + kotak dunia Tahap 9 (garis
+  // pantai, tiang & pagar dek) + rumah pemain, meja lapak & fasilitas kota.
+  resolveCollisions(selfPos, [
+    ...WORLD_BOXES,
+    ...kampung.houseColliders(),
+    ...pasar.stallColliders(),
+    ...fasilitas.colliders(),
+  ]);
 
-  // Suara langkah kaki mengikuti jarak tempuh di tanah.
-  if (moving && selfPos.y <= 0) {
+  // Suara langkah kaki mengikuti jarak tempuh di tanah (lantai setempat).
+  const groundNow = floorHeight(selfPos.x, selfPos.z, selfPos.y);
+  if (moving && selfPos.y <= groundNow + 0.05) {
     stepDistance += speed * dt;
     const stride = input.sprint ? 2.7 : 2.1;
     if (stepDistance >= stride) {
@@ -707,6 +766,10 @@ function stepLocalPhysics(dt: number) {
       selfPos.x += dx * Math.min(1, dt * 2.5);
       selfPos.z += dz * Math.min(1, dt * 2.5);
     }
+    // Ketinggian: jepret halus ke ketinggian server bila selisihnya besar
+    // (mis. selesai menaiki tangga / jatuh dari dek) agar tidak melayang.
+    const dy = (Number(serverSelf.y) || 0) - selfPos.y;
+    if (Math.abs(dy) > 1) selfPos.y += dy * Math.min(1, dt * 5);
   }
 
   // Terapkan ke avatar + animasi.
@@ -721,8 +784,8 @@ function stepLocalPhysics(dt: number) {
 
     let anim = "idle";
     if (emoteName === "sit" && moving) emoteUntilMs = 0; // duduk batal saat bergerak
-    if (performance.now() < emoteUntilMs && selfPos.y <= 0.05) anim = emoteName;
-    else if (selfPos.y > 0.05) anim = "jump";
+    if (performance.now() < emoteUntilMs && selfPos.y <= groundNow + 0.05) anim = emoteName;
+    else if (selfPos.y > groundNow + 0.05) anim = "jump";
     else if (moving) anim = sprinting ? "run" : "walk";
     selfAvatar.update(dt, anim);
   }
@@ -854,6 +917,7 @@ renderer.setAnimationLoop(() => {
   const t = clock.elapsedTime;
 
   plaza.update(dt, t);
+  pantai.update(t);
   adaptQuality(dt);
 
   if (!started) {
@@ -872,6 +936,10 @@ renderer.setAnimationLoop(() => {
       if (network.connected) {
         plaza.setNight(network.worldIsNight);
         hud.setWorldIndicator(network.worldIsNight);
+        // Tahap 9: banner event komunitas + tawaran gaya musiman di editor.
+        hud.setEventBanner(network.activeEvent);
+        const season = network.activeSeason;
+        hud.setSeason(season?.style ?? "", season?.label ?? "");
         kampung.sync(network.plots as any);
         if (openPlotId && hud.plotPanelOpen) hud.showPlot(buildPlotView(openPlotId));
         // Pasar (Tahap 7): terapkan state lapak terbaru; segarkan panel —
