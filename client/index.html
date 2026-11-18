@@ -104,6 +104,14 @@
           <span id="conn-status">🟡 Menghubungkan…</span>
           <span id="player-count">👥 1 pemain</span>
           <span id="balance-chip">🪙 — KC</span>
+          <span id="world-chip" title="Sisa waktu fase siang/malam (diatur server)">☀️ Siang — —:—</span>
+          <!-- Strip kebutuhan hidup ringkas (Tahap 6B) — angka dari server;
+               di dalam tumpukan kiri atas sejak Tahap 10 agar tidak bertumpuk -->
+          <div id="needs-strip" title="Kebutuhan hidup — kelola di panel 💼">
+            <span class="ns-item">🍗<span class="ns-bar"><span id="ns-hunger-fill" class="ns-fill"></span></span></span>
+            <span class="ns-item">💧<span class="ns-bar"><span id="ns-thirst-fill" class="ns-fill"></span></span></span>
+            <span class="ns-item">🚽<span class="ns-bar"><span id="ns-toilet-fill" class="ns-fill"></span></span></span>
+          </div>
         </div>
         <div class="top-right">
           <button id="btn-home" class="icon-btn" title="Ke Rumahku">🏠</button>
@@ -116,18 +124,12 @@
           <button id="btn-daynight" class="icon-btn" title="Waktu dunia (diatur server)">☀️</button>
           <button id="btn-photo" class="icon-btn" title="Ambil foto">📸</button>
           <button id="btn-gallery" class="icon-btn" title="Galeri foto (tersimpan di perangkat ini)">🖼️</button>
+          <button id="btn-help" class="icon-btn" title="Tutorial & bantuan">❓</button>
         </div>
       </div>
 
       <!-- Banner event komunitas (Tahap 9) — dari state server -->
       <div id="event-banner" class="hidden"></div>
-
-      <!-- Strip kebutuhan hidup ringkas (Tahap 6B) — angka dari server -->
-      <div id="needs-strip" title="Kebutuhan hidup — kelola di panel 💼">
-        <span class="ns-item">🍗<span class="ns-bar"><span id="ns-hunger-fill" class="ns-fill"></span></span></span>
-        <span class="ns-item">💧<span class="ns-bar"><span id="ns-thirst-fill" class="ns-fill"></span></span></span>
-        <span class="ns-item">🚽<span class="ns-bar"><span id="ns-toilet-fill" class="ns-fill"></span></span></span>
-      </div>
 
       <div id="joystick"><div id="joystick-knob"></div></div>
 
@@ -196,7 +198,10 @@
         <div class="friends-label">📜 Quest Harian (reset tiap hari)</div>
         <div id="jobs-quests"></div>
         <div class="friends-label">Daftar pekerjaan</div>
+        <button id="btn-change-jobs" class="hidden">🔁 Ganti Pilihan Pekerjaan (500 KC)</button>
         <div id="jobs-list"></div>
+        <div class="friends-label">📊 Statistik Pekerjaan</div>
+        <div id="jobs-stats"></div>
         <button id="btn-jobs-close">Tutup</button>
       </div>
 
@@ -246,6 +251,36 @@
         <h3 id="interact-title"></h3>
         <p id="interact-desc"></p>
         <button id="btn-interact-close">Tutup</button>
+      </div>
+
+      <!-- Panah penunjuk tujuan sif (Tahap 10) — di bawah layar, mengikuti
+           tujuan dari server + arah kamera; tersembunyi saat tidak ada sif -->
+      <div id="nav-arrow" class="hidden">
+        <span id="nav-arrow-glyph">▲</span>
+        <span id="nav-arrow-label"></span>
+        <span id="nav-arrow-dist"></span>
+      </div>
+
+      <!-- Kartu hasil sif (Tahap 10) — berhasil/gagal, dari pesan server -->
+      <div id="job-result-card" class="hidden">
+        <div id="job-result-title"></div>
+        <div id="job-result-body"></div>
+      </div>
+
+      <!-- Tutorial masuk kota (Tahap 10) — sekali per perangkat, bisa dibuka
+           lagi dari tombol ❓; dunia tetap terlihat di belakangnya -->
+      <div id="tutorial-overlay" class="hidden">
+        <div class="tut-card">
+          <div id="tut-icon"></div>
+          <h3 id="tut-title"></h3>
+          <p id="tut-text"></p>
+          <div id="tut-dots"></div>
+          <div class="tut-btns">
+            <button id="btn-tut-skip" class="tut-btn ghost">Lewati</button>
+            <button id="btn-tut-prev" class="tut-btn ghost">⬅️ Kembali</button>
+            <button id="btn-tut-next" class="tut-btn primary">Lanjut ➡️</button>
+          </div>
+        </div>
       </div>
 
       <div id="toast" class="hidden"></div>
