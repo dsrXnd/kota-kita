@@ -1,7 +1,7 @@
 # 🏙️ KOTA KITA
 
 Dunia virtual sosial 3D multiplayer berbasis browser, bertema kota Indonesia modern.
-Sudah berjalan: satu Plaza Utama, avatar bisa dikustomisasi (warna, gaya rambut/penutup kepala, baju batik), kontrol sentuh Android, multiplayer real-time, chat, emote, mode foto, akun persisten + teman + moderasi (Tahap 3), paket deploy satu alamat (Tahap 4), **ekonomi Koin Kota (KC)** — saldo akun, bonus harian, dan 3 pekerjaan dalam dunia (Tahap 5), **Kampung Kita** — 24 kavling yang bisa diklaim dengan KC serta katalog 3 rumah pribadi yang tersinkron ke semua pemain (Tahap 6), dan **kehidupan warga (Tahap 6B)** — check-in streak beruntun (10–150 KC), 3 meter kebutuhan hidup (lapar/haus/kebelet) dengan jalur isi ulang gratis & berbayar, 3 pekerjaan baru (Petugas Taman, Ojek Makanan, Satpam Malam), cooldown per-pekerjaan, skip cooldown berbayar dengan maks. 2 sif bersamaan, dan siklus siang-malam 24 menit yang diatur server untuk semua pemain.
+Sudah berjalan: satu Plaza Utama, avatar bisa dikustomisasi (warna, gaya rambut/penutup kepala, baju batik), kontrol sentuh Android, multiplayer real-time, chat, emote, mode foto, akun persisten + teman + moderasi (Tahap 3), paket deploy satu alamat (Tahap 4), **ekonomi Koin Kota (KC)** — saldo akun, bonus harian, dan 3 pekerjaan dalam dunia (Tahap 5), **Kampung Kita** — 24 kavling yang bisa diklaim dengan KC serta katalog 3 rumah pribadi yang tersinkron ke semua pemain (Tahap 6), **kehidupan warga (Tahap 6B)** — check-in streak beruntun (10–150 KC), 3 meter kebutuhan hidup (lapar/haus/kebelet) dengan jalur isi ulang gratis & berbayar, 3 pekerjaan baru (Petugas Taman, Ojek Makanan, Satpam Malam), cooldown per-pekerjaan, skip cooldown berbayar dengan maks. 2 sif bersamaan, dan siklus siang-malam 24 menit yang diatur server untuk semua pemain, dan **Pasar (Tahap 7)** — 10 lapak usaha yang bisa diklaim seharga 10.000 KC, dijual-belikan antar-pemain secara atomik (es teh, kopi, bakso, batik suvenir) dengan harga dalam rentang sistem, dan kas usaha privat yang diambil pemilik saat berkunjung.
 
 Dokumen desain ada di folder `docs/`:
 - `game-design.md` — Game Design Document
@@ -12,6 +12,7 @@ Dokumen desain ada di folder `docs/`:
 - `economy.md` — ekonomi Koin Kota: aturan KC, check-in streak, 6 pekerjaan, cooldown & skip berbayar (Tahap 5 + 6B)
 - `needs.md` — kebutuhan hidup (meter, laju, efek kritis, titik isi ulang) & waktu dunia server (Tahap 6B)
 - `housing.md` — Kampung Kita: denah kavling, harga, aturan klaim/bangun/upgrade, model data & collider dinamis (Tahap 6)
+- `market.md` — Pasar: denah lapak, katalog & rentang harga, aturan klaim/jual-beli atomik/kas usaha privat, model data & collider dinamis (Tahap 7)
 - `roadmap.md` — rencana tahap berikutnya
 
 ## Struktur
@@ -94,6 +95,12 @@ Uji beban 50 pemain: server menyala, lalu `cd server && npm run test:load`.
   npm run test:plots
   ```
   Uji ini mengelola servernya sendiri (port 2577 + folder data sementara), jadi tidak perlu server lain menyala. Membuktikan klaim kavling ditolak saat saldo kurang, saldo terpotong tepat (klaim 2.500 KC, bangun 2.000 KC, upgrade hanya selisih 3.000 KC), klaim ganda ditolak dua arah, Rumah Tingkat ditolak di Kavling 1, kepemilikan terlihat klien lain di state, collider rumah menahan pemain, teleport "Ke Rumahku" bekerja, dan semuanya persisten setelah server restart. Detail perumahan: `docs/housing.md`.
+- **Otomatis (usaha pemain Tahap 7):**
+  ```bash
+  cd server
+  npm run test:market
+  ```
+  Uji ini mengelola servernya sendiri (port 2579 + folder data sementara), jadi tidak perlu server lain menyala. Membuktikan klaim lapak terpotong tepat 10.000 KC & klaim ganda ditolak dua arah, kepemilikan lapak independen dari kavling, harga di luar rentang & perubahan oleh non-pemilik ditolak, pembelian memindahkan KC secara atomik (saldo pembeli −harga, kas pemilik +harga, meter terisi, tercatat di log & ledger), pembelian saldo kurang/lapak sendiri/barang tak tersedia/tamu ditolak tanpa perubahan, batik menambah suvenir persisten, kas usaha privat (tidak ada di state & non-pemilik tidak bisa mengambil; pemilik mengambil → saldo naik tepat sejumlah kas), collider meja lapak menahan pemain, dan semuanya persisten setelah server restart. Detail pasar: `docs/market.md`.
 - **Manual:** buka game di dua perangkat/tab berbeda, masuk dengan nama berbeda, bergerak & chat — avatar harus terlihat bergerak di layar satu sama lain.
 - **Build produksi:** `cd client && npm run build` dan `cd server && npm run build` harus selesai tanpa error.
 
