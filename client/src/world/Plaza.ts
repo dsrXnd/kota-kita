@@ -129,8 +129,8 @@ export class Plaza {
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.camera.left = -55;
     this.sun.shadow.camera.right = 145;
-    this.sun.shadow.camera.top = 55;
-    this.sun.shadow.camera.bottom = -55;
+    this.sun.shadow.camera.top = 95;
+    this.sun.shadow.camera.bottom = -95;
     this.sun.shadow.camera.far = 120;
     this.sun.shadow.bias = -0.0004;
     scene.add(this.sun);
