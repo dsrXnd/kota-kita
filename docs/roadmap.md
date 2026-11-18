@@ -84,6 +84,9 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
 
 *Spek DIKUNCI user 18 Nov 2026. Dibangun setelah Tahap 6 karena rumah adalah "markas gratis" untuk kebutuhan dasar.*
 
+**Bonus check-in streak (mengubah bonus Tahap 5 — keputusan user 18 Nov 2026):**
+- [ ] Bonus harian rata 100 KC **DIGANTIKAN** sistem streak check-in (bukan tambahan): klaim beruntun per hari kalender Asia/Jakarta — Hari 1: **10 KC**, Hari 2: **20**, Hari 3: **30**, Hari 4: **40**, Hari 5: **50**, Hari 6: **60**, Hari 7: **150 KC** (jackpot mingguan; total 360 KC/minggu); kelewat 1 hari → hitungan **kembali ke Hari 1**; siklus 7 hari berulang
+
 **Waktu dunia (menggantikan toggle siang/malam manual):**
 - [ ] Siklus siang-malam diatur **server** dan sama untuk semua pemain: **1 hari game = 24 menit asli (16 menit siang, 8 menit malam)** — keputusan user: siklus cepat
 
