@@ -99,8 +99,10 @@
         <div class="top-left">
           <span id="conn-status">🟡 Menghubungkan…</span>
           <span id="player-count">👥 1 pemain</span>
+          <span id="balance-chip">🪙 — KC</span>
         </div>
         <div class="top-right">
+          <button id="btn-jobs" class="icon-btn" title="Pekerjaan & Koin Kota">💼</button>
           <button id="btn-friends" class="icon-btn" title="Teman & pemain">👥</button>
           <button id="btn-sound" class="icon-btn" title="Suara nyala/mati">🔊</button>
           <button id="btn-daynight" class="icon-btn" title="Siang / malam">🌙</button>
@@ -145,6 +147,20 @@
         <div class="friends-label">Pemain di kota saat ini</div>
         <div id="nearby-list"></div>
         <button id="btn-friends-close">Tutup</button>
+      </div>
+
+      <div id="jobs-panel" class="hidden">
+        <h3>💼 Pekerjaan &amp; Koin Kota</h3>
+        <p id="jobs-balance">Memuat data pekerjaan…</p>
+        <button id="btn-claim-bonus" class="hidden">🎁 Klaim bonus harian</button>
+        <div id="jobs-active" class="hidden">
+          <div id="jobs-active-title"></div>
+          <div id="jobs-active-progress"></div>
+          <button id="btn-job-cancel">Batalkan sif</button>
+        </div>
+        <div class="friends-label">Daftar pekerjaan</div>
+        <div id="jobs-list"></div>
+        <button id="btn-jobs-close">Tutup</button>
       </div>
 
       <div id="interact-card" class="hidden">
