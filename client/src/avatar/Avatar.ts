@@ -7,7 +7,7 @@ export interface AvatarColors {
   /** pendek | panjang | hijab | peci | botak */
   hair?: string;
   hairColor?: string;
-  /** polos | batik */
+  /** polos | batik | merahputih | koko | pesta (tiga terakhir musiman, Tahap 9) */
   shirtStyle?: string;
 }
 
@@ -42,6 +42,112 @@ function batikTexture(base: string): THREE.CanvasTexture {
   return tex;
 }
 
+/** Tekstur baju musiman 🇮🇩 Merah Putih (Tahap 9): putih bersih, separuh atas merah. */
+function merahPutihTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#ffffff";
+  g.fillRect(0, 0, 128, 128);
+  g.fillStyle = "#d92b2b";
+  g.fillRect(0, 0, 128, 58);
+  g.fillStyle = "rgba(0,0,0,0.12)";
+  g.fillRect(0, 58, 128, 3);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** Tekstur baju musiman 🌙 Koko Ramadan (Tahap 9): krem lembut, garis placket emas di tengah, motif wajik samar. */
+function kokoTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#f7f3e8";
+  g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = "rgba(160,130,60,0.25)";
+  g.lineWidth = 2;
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      const cx = x * 32 + 16;
+      const cy = y * 32 + 16;
+      g.beginPath();
+      g.moveTo(cx, cy - 8);
+      g.lineTo(cx + 8, cy);
+      g.lineTo(cx, cy + 8);
+      g.lineTo(cx - 8, cy);
+      g.closePath();
+      g.stroke();
+    }
+  }
+  g.fillStyle = "#c9a227";
+  g.fillRect(61, 0, 6, 128);
+  g.fillStyle = "#8a6d1c";
+  for (let y = 14; y < 128; y += 24) {
+    g.beginPath();
+    g.arc(64, y, 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** Tekstur baju musiman 🎉 Pesta Tahun Baru (Tahap 9): biru malam dengan taburan confetti warna-warni. */
+function pestaTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#232c4f";
+  g.fillRect(0, 0, 128, 128);
+  const colors = ["#ffd94d", "#ff5d7a", "#4dd2ff", "#7dff8a", "#ff9f43", "#e3e3e3"];
+  let seed = 42;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  for (let i = 0; i < 70; i++) {
+    g.fillStyle = colors[i % colors.length];
+    const x = rnd() * 128;
+    const y = rnd() * 128;
+    if (i % 3 === 0) g.fillRect(x, y, 7, 3);
+    else {
+      g.beginPath();
+      g.arc(x, y, 2.2, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** Material baju menurut gaya: polos = warna datar; lainnya = tekstur prosedural. */
+function shirtMaterial(colors: AvatarColors): THREE.MeshStandardMaterial {
+  switch (colors.shirtStyle) {
+    case "batik":
+      return new THREE.MeshStandardMaterial({ map: batikTexture(colors.shirt), flatShading: true, roughness: 0.9 });
+    case "merahputih":
+      return new THREE.MeshStandardMaterial({ map: merahPutihTexture(), flatShading: true, roughness: 0.9 });
+    case "koko":
+      return new THREE.MeshStandardMaterial({ map: kokoTexture(), flatShading: true, roughness: 0.9 });
+    case "pesta":
+      return new THREE.MeshStandardMaterial({ map: pestaTexture(), flatShading: true, roughness: 0.9 });
+    default:
+      return new THREE.MeshStandardMaterial({ color: colors.shirt, flatShading: true, roughness: 0.9 });
+  }
+}
+
 function roundedRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   g.beginPath();
   g.moveTo(x + r, y);
@@ -72,10 +178,7 @@ export class Avatar {
 
   constructor(name: string, colors: AvatarColors) {
     const skin = new THREE.MeshStandardMaterial({ color: colors.skin, flatShading: true, roughness: 0.8 });
-    const shirt =
-      colors.shirtStyle === "batik"
-        ? new THREE.MeshStandardMaterial({ map: batikTexture(colors.shirt), flatShading: true, roughness: 0.9 })
-        : new THREE.MeshStandardMaterial({ color: colors.shirt, flatShading: true, roughness: 0.9 });
+    const shirt = shirtMaterial(colors);
     const pants = new THREE.MeshStandardMaterial({ color: colors.pants, flatShading: true, roughness: 0.9 });
     const hairMat = new THREE.MeshStandardMaterial({ color: colors.hairColor ?? "#3a2a1c", flatShading: true, roughness: 1 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.6 });
