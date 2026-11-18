@@ -66,17 +66,54 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
 
 ## Tahap 6 — Kavling & Rumah Pribadi (Kampung Kita)
 
-- [ ] Kawasan permukiman baru **Kampung Kita** menempel pada peta plaza: petak-petak kavling kosong bergrid (target awal ±24 kavling) dengan papan nomor
-- [ ] Akun bisa **klaim 1 kavling** memakai KC; kepemilikan tersimpan persisten di server dan terlihat semua pemain (nama pemilik di papan rumah)
-- [ ] Katalog rumah orisinal 3 tingkat (mis. Rumah Bambu, Rumah Batu, Rumah Tingkat) — dibangun seketika dari primitif bergaya art-style kita, lengkap dengan collider
+*Spek harga & keuntungan DIKUNCI user 18 Nov 2026 (dihitung terhadap ekonomi Tahap 5: saldo awal 500 KC, bonus harian 100 KC, gaji pekerjaan 150–250 KC).*
+
+- [ ] Kawasan permukiman baru **Kampung Kita** menempel pada peta plaza: **24 kavling** bergrid dengan papan nomor — **16 Kavling 1** (barisan dalam) + **8 Kavling 2** (pinggir jalan utama dekat gerbang plaza, petak lebih luas)
+- [ ] Akun bisa **klaim 1 kavling** memakai KC; kepemilikan tersimpan persisten di server dan terlihat semua pemain (nama pemilik di papan rumah); klaim atas petak yang sudah dimiliki ditolak server
+- [ ] **Harga kavling (keputusan user):** Kavling 1 = **2.500 KC** (cukup untuk Rumah Bambu & Batu) · Kavling 2 = **5.000 KC** (lokasi strategis paling sering dilewati pemain; satu-satunya yang boleh dibangun Rumah Tingkat; muat halaman/taman depan)
+- [ ] Katalog rumah orisinal 3 tingkat — dibangun seketika dari primitif bergaya art-style kita, lengkap dengan collider; upgrade cukup membayar selisih harga:
+  - **Rumah Bambu — 2.000 KC**: rumah pertama; mengaktifkan tombol "Ke Rumahku", titik istirahat/respawn pribadi
+  - **Rumah Batu — 5.000 KC**: permanen & lebih lega, kapasitas tamu lebih banyak, bisa memasang taman kecil
+  - **Rumah Tingkat — 7.500 KC** (khusus Kavling 2): 2 lantai + balkon, kapasitas tamu terbanyak, trofi prestise warga; kandidat fitur sewa kamar di tahap lanjutan (belum dijanjikan)
 - [ ] Tombol **"Ke Rumahku"** (teleport pulang) + pemain lain bisa berkunjung & melihat rumah dari luar
 - [ ] Statistik awal: jumlah rumah berdiri terhitung di server (dipakai Tahap 8)
 
-**Selesai bila:** uji otomatis LULUS — klaim kavling tersimpan & termuat lagi setelah server restart, klaim ganda atas petak yang sama ditolak, rumah pemain A terlihat benar oleh klien B, dan pemain tidak menembus rumah (collider aktif).
+**Selesai bila:** uji otomatis LULUS — klaim kavling tersimpan & termuat lagi setelah server restart, klaim ganda atas petak yang sama ditolak, klaim dengan saldo kurang ditolak, Rumah Tingkat ditolak di Kavling 1, rumah pemain A terlihat benar oleh klien B, dan pemain tidak menembus rumah (collider aktif).
+
+## Tahap 6B — Kebutuhan Hidup, Pekerjaan Baru & Waktu Dunia
+
+*Spek DIKUNCI user 18 Nov 2026. Dibangun setelah Tahap 6 karena rumah adalah "markas gratis" untuk kebutuhan dasar.*
+
+**Waktu dunia (menggantikan toggle siang/malam manual):**
+- [ ] Siklus siang-malam diatur **server** dan sama untuk semua pemain: **1 hari game = 24 menit asli (16 menit siang, 8 menit malam)** — keputusan user: siklus cepat
+
+**Kebutuhan hidup (3 meter di HUD: 🍗 Lapar · 💧 Haus · 🚽 Kebelet):**
+- [ ] Meter berkurang perlahan **hanya selama bermain** (±50 menit dari penuh ke kosong); tidak berkurang saat offline; peringatan di 25%
+- [ ] Prinsip desain: **selalu ada jalur gratis** — yang berbayar adalah jalur instan/nyaman; pemain tidak boleh terkunci dari bermain karena miskin KC
+  - 💧 Haus: air mineral **10 KC** di warung/lapak · **gratis** di air mancur plaza
+  - 🍗 Lapar: jajanan **20 KC**, makan besar **45 KC** (penuh) · **gratis** masak di rumah sendiri
+  - 🚽 Kebelet: WC umum Balai Kota **gratis** · WC bersih instan dekat plaza **5 KC** · gratis di rumah sendiri
+- [ ] Efek kritis ringan (tanpa kematian): kecepatan lari turun & tidak bisa memulai sif kerja sampai kebutuhan teratasi
+- [ ] Di Tahap 7 kebutuhan ini menjadi permintaan bagi lapak pemain (makan di lapak pemain lain = KC berpindah ke pemilik)
+
+**Pekerjaan baru (melengkapi 3 pekerjaan Tahap 5):**
+- [ ] 🌷 **Petugas Taman — 170 KC**: datangi & siram 6 titik tanaman keliling plaza/taman
+- [ ] 🛵 **Ojek Makanan — 220 KC**: ambil makanan dari toko acak, antar ke titik tujuan acak dalam 120 detik
+- [ ] 🌙 **Satpam Malam — 250 KC**: jaga area Balai Kota 60 detik terakumulasi; sif hanya bisa diambil saat **malam server**
+
+**Cooldown per pekerjaan (keputusan user, menggantikan rata 10 menit Tahap 5; tetap berjalan saat offline & tersimpan di server):**
+- [ ] Penjaga Warung Kopi **90 menit** · Petugas Taman **120 menit** · Petugas Kebersihan **120 menit** · Kurir Paket **120 menit** · Ojek Makanan **145 menit** · Satpam Malam **150 menit**
+
+**Sistem skip cooldown berbayar (keputusan user):**
+- [ ] Pemain memegang maksimal **2 pekerjaan aktif** sekaligus, dan dua-duanya tidak boleh sama-sama pekerjaan antar (Kurir + Ojek ditolak server)
+- [ ] Dari 2 pekerjaan yang diambil, pemain punya **3 attempt skip cooldown per hari** (jatah bersama, reset harian bareng bonus harian, zona Asia/Jakarta): membayar biaya per pekerjaan untuk mengambil lagi pekerjaan yang sedang cooldown — Penjaga **60 KC**, Taman **70 KC**, Kebersihan **80 KC**, Kurir **90 KC**, Ojek **110 KC**, Satpam **125 KC** (40–50% dari gaji; biaya **terbakar** dari peredaran KC)
+- [ ] Biaya skip **hangus** bila sif dibatalkan atau gagal; peringatan ditampilkan jelas di client sebelum pembayaran dikonfirmasi
+
+**Selesai bila:** uji otomatis LULUS — meter hanya berkurang saat bermain & jalur gratis berfungsi, efek kritis diterapkan server, cooldown per pekerjaan sesuai tabel & bertahan setelah relogin, skip berbayar mengurangi saldo + jatah attempt dengan benar (attempt ke-4 ditolak, skip tanpa saldo ditolak), dua pekerjaan antar bersamaan ditolak, Satpam ditolak saat siang server — plus regresi penuh tetap hijau.
 
 ## Tahap 7 — Usaha Pemain (Pasar)
 
-- [ ] Kawasan **Pasar** (dari daftar tunggu Tahap 4) berisi lapak-lapak yang bisa dimiliki akun memakai KC
+- [ ] Kawasan **Pasar** (dari daftar tunggu Tahap 4) berisi lapak-lapak yang bisa dimiliki akun memakai KC — **harga lapak DIKUNCI user 18 Nov 2026: 10.000 KC** (satu-satunya aset produktif: menghasilkan KC dari penjualan ke pemain lain)
 - [ ] Pemilik lapak menjual barang sederhana (kopi, bakso, es teh, batik) dengan harga dalam rentang yang diatur sistem; pemain lain membeli lewat tombol interaksi → KC berpindah antar-akun secara atomik di server
 - [ ] Penghasilan lapak terkumpul sebagai "kas usaha" yang diambil pemilik saat berkunjung (mendorong pemilik online & berinteraksi — kekuatan real-time kita)
 - [ ] Peran sosial baru muncul alami: pedagang & pembeli bertemu langsung, bisa chat & tawar lewat chat
