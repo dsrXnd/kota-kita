@@ -51,6 +51,15 @@ export interface ShiftInfo {
   pickupName: string;
   targetName: string;
   deadline: number;
+  /** Tujuan sif saat ini untuk panah penunjuk (Tahap 10) — dari server. */
+  objective: { x: number; z: number; label: string };
+}
+
+/** Statistik satu pekerjaan milik akun ini (Tahap 10) — dihitung server sejak Tahap 10. */
+export interface JobStatInfo {
+  done: number;
+  failed: number;
+  earned: number;
 }
 
 export interface JobsPayload {
@@ -66,10 +75,42 @@ export interface JobsPayload {
   /** Sisa jatah skip cooldown berbayar hari ini. */
   skipAttemptsLeft: number;
   isNight: boolean;
+  /** 2 pekerjaan pilihan akun ini (Tahap 10); [] = belum memilih / tamu. */
+  chosenJobs: string[];
+  /** True bila akun belum memilih 2 pekerjaannya (panel tampil mode memilih). */
+  needsChoice: boolean;
+  /** Biaya ganti pilihan pekerjaan (KC terbakar). */
+  changeFee: number;
+  /** Statistik pekerjaan per akun (Tahap 10): jobId -> { done, failed, earned }. */
+  jobStats: Record<string, JobStatInfo>;
   jobs: JobInfo[];
   actives: ShiftInfo[];
   /** Quest sosial harian sesi ini (Tahap 9) — kosong untuk tamu. */
   quests: QuestInfo[];
+}
+
+/** Hasil memilih/mengganti pekerjaan (Tahap 10). */
+export interface JobChooseResult {
+  ok: boolean;
+  message: string;
+  /** KC yang terbakar untuk ganti pilihan (0 = pilihan pertama, gratis). */
+  charged?: number;
+}
+
+/** Sif selesai (Tahap 10) — untuk kartu hasil & reaksi avatar. */
+export interface JobDoneInfo {
+  jobId: string;
+  name: string;
+  pay: number;
+  cooldownMs: number;
+  balance: number;
+}
+
+/** Sif gagal (Tahap 10) — untuk kartu hasil & reaksi avatar. */
+export interface JobFailedInfo {
+  jobId: string;
+  name: string;
+  reason: string;
 }
 
 // ---------- Quest Sosial Harian (Tahap 9) ----------
@@ -255,6 +296,9 @@ export class Network {
   onJobs: ((payload: JobsPayload) => void) | null = null;
   onJobResult: ((ok: boolean, message: string) => void) | null = null;
   onJobUpdate: ((update: JobUpdate) => void) | null = null;
+  onJobChooseResult: ((result: JobChooseResult) => void) | null = null;
+  onJobDone: ((info: JobDoneInfo) => void) | null = null;
+  onJobFailed: ((info: JobFailedInfo) => void) | null = null;
   onSkipResult: ((ok: boolean, message: string) => void) | null = null;
   onNeeds: ((needs: NeedsInfo) => void) | null = null;
   onNeedsResult: ((result: NeedsResult) => void) | null = null;
@@ -295,6 +339,9 @@ export class Network {
         this.onJobResult?.(data.ok, data.message)
       );
       this.room.onMessage("job_update", (data: JobUpdate) => this.onJobUpdate?.(data));
+      this.room.onMessage("job_choose_result", (data: JobChooseResult) => this.onJobChooseResult?.(data));
+      this.room.onMessage("job_done", (data: JobDoneInfo) => this.onJobDone?.(data));
+      this.room.onMessage("job_failed", (data: JobFailedInfo) => this.onJobFailed?.(data));
       this.room.onMessage("job_skip_result", (data: { ok: boolean; message: string }) =>
         this.onSkipResult?.(data.ok, data.message)
       );
@@ -456,6 +503,11 @@ export class Network {
 
   startJob(jobId: string) {
     if (this.connected && this.room) this.room.send("job_start", { jobId });
+  }
+
+  /** Pilih / ganti 2 pekerjaan milik akun ini (Tahap 10) — divalidasi & dibiayai server. */
+  chooseJobs(jobIds: string[]) {
+    if (this.connected && this.room) this.room.send("job_choose", { jobIds });
   }
 
   cancelJob(jobId?: string) {
