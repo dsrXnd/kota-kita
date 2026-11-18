@@ -125,12 +125,12 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
 
 ## Tahap 8 — Kota Hidup: Statistik, Kabar & Voting
 
-- [ ] **Panel Statistik Kota**: penduduk (total akun terdaftar), warga online sekarang, rumah berdiri, lapak aktif, kas kota (terisi dari biaya klaim & bangun)
-- [ ] **Kabar Kota**: umpan pengumuman otomatis server di Papan Pengumuman & HUD — warga baru bergabung, rumah baru berdiri, hasil voting, fasilitas baru selesai
-- [ ] **Voting usulan fasilitas**: usulan berkala (mis. Taman Bunga, Lapangan Futsal, Perpustakaan Mini) — 1 akun = 1 suara, jendela 24 jam, lolos bila suara setuju mencapai ambang minimal & lebih banyak dari menolak
-- [ ] Fasilitas yang lolos **muncul di dunia** pada pemuatan berikutnya (aset disiapkan lebih dulu sebagai set fasilitas yang bisa diaktifkan server, lengkap dengan collider)
+- [x] **Panel Statistik Kota**: penduduk (total akun terdaftar), warga online sekarang, rumah berdiri, lapak aktif, kas kota (terisi dari biaya klaim & bangun)
+- [x] **Kabar Kota**: umpan pengumuman otomatis server di Papan Pengumuman & HUD — warga baru bergabung, rumah baru berdiri, hasil voting, fasilitas baru selesai
+- [x] **Voting usulan fasilitas**: usulan berkala (mis. Taman Bunga, Lapangan Futsal, Perpustakaan Mini) — 1 akun = 1 suara, jendela 24 jam, lolos bila suara setuju mencapai ambang minimal & lebih banyak dari menolak
+- [x] Fasilitas yang lolos **muncul di dunia** — ternyata bahkan lebih baik dari bunyi awal: tampil **langsung di tengah sesi** untuk semua klien yang sedang online (aset disiapkan lebih dulu sebagai set fasilitas yang bisa diaktifkan server, lengkap dengan collider)
 
-**Selesai bila:** uji otomatis LULUS — satu akun tidak bisa voting dua kali pada usulan yang sama, tally & penutupan 24 jam benar, fasilitas hasil voting aktif di state dan terlihat oleh klien lain, kabar kota tercatat untuk peristiwa-peristiwa kunci.
+**Selesai bila:** ✅ TERBUKTI `test:city` (18 Nov 2026) — statistik tepat (kas kota 14.500 = klaim kavling 2.500 + bangun rumah 2.000 + klaim lapak 10.000), kabar tercatat untuk registrasi/rumah/lapak & persisten setelah restart, satu akun tidak bisa voting dua kali pada usulan yang sama (suara final), tamu ditolak, tally 3 setuju/1 tolak menutup LOLOS & 1 setuju/2 tolak menutup GAGAL (fasilitas gagal ke belakang antrean), fasilitas hasil voting aktif di state dan terlihat oleh klien lain, collider fasilitas menahan pemain, dan lokasi fasilitas bebas dilewati sebelum aktif. Detail: `docs/city.md`.
 
 ## Tahap 9 — Ekspansi & Komunitas
 
