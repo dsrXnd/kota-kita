@@ -1,13 +1,14 @@
-// Uji Tahap 5: ekonomi Koin Kota (KC) end-to-end.
+// Uji Tahap 5 (+ pembaruan 6B): ekonomi Koin Kota (KC) end-to-end.
 // Cara pakai: server harus sudah jalan (npm start), lalu: npm run test:economy
 // Yang dibuktikan:
 //  1. Akun baru mulai dengan saldo 500 KC (terbaca di /auth/me & payload jobs).
-//  2. Klaim bonus harian: 500 -> 600; klaim kedua di hari yang sama ditolak.
+//  2. Klaim check-in streak Hari 1: 500 -> 510 (+10 KC, tangga streak Tahap 6B
+//     menggantikan bonus rata +100 KC); klaim kedua di hari yang sama ditolak.
 //  3. Tamu ditolak untuk bonus_claim dan job_start.
 //  4. Pekerjaan kebersihan diselesaikan dengan BERJALAN ke 5 titik (input gerak,
-//     bukan teleport) -> gaji 180 KC dibayar TEPAT sekali (600 -> 780).
+//     bukan teleport) -> gaji 180 KC dibayar TEPAT sekali (510 -> 690).
 //  5. Mulai pekerjaan yang sama saat cooldown ditolak server.
-//  6. Setelah putus & masuk lagi, saldo 780 tetap persisten.
+//  6. Setelah putus & masuk lagi, saldo 690 tetap persisten.
 import { Client } from "colyseus.js";
 
 const HTTP = process.env.KOTA_HTTP || "http://localhost:2567";
@@ -99,22 +100,25 @@ const jobs = await jobsPromise;
 if (!jobs) fail("Server tidak menjawab jobs_get");
 if (jobs.guest) fail("Payload jobs menandai akun sebagai tamu");
 if (jobs.balance !== 500) fail(`Saldo di payload jobs = ${jobs.balance}, harusnya 500`);
-if (!jobs.bonusAvailable) fail("Bonus harian harusnya tersedia untuk akun baru");
-if (!Array.isArray(jobs.jobs) || jobs.jobs.length !== 3) fail("Daftar pekerjaan harusnya berisi 3 pekerjaan");
-console.log("✅ Payload jobs: saldo 500 KC, bonus tersedia, 3 pekerjaan terdaftar");
+if (!jobs.bonusAvailable) fail("Check-in harian harusnya tersedia untuk akun baru");
+if (!Array.isArray(jobs.jobs) || jobs.jobs.length !== 6) fail("Daftar pekerjaan harusnya berisi 6 pekerjaan");
+if (jobs.bonusReward !== 10 || jobs.bonusStreakDay !== 1) fail(`Check-in pertama harusnya Hari 1 = +10 KC, terbaca hari ${jobs.bonusStreakDay} +${jobs.bonusReward}`);
+console.log("✅ Payload jobs: saldo 500 KC, check-in Hari 1 (+10 KC) tersedia, 6 pekerjaan terdaftar");
 
-// 2. Bonus harian: 500 -> 600, klaim kedua ditolak.
+// 2. Check-in streak Hari 1: 500 -> 510, klaim kedua ditolak.
 const bonus1Promise = nextMessage(room, "bonus_result");
 room.send("bonus_claim", {});
 const bonus1 = await bonus1Promise;
-if (!bonus1?.ok || bonus1.balance !== 600) fail(`Klaim bonus pertama salah: ${JSON.stringify(bonus1)}`);
+if (!bonus1?.ok || bonus1.balance !== 510 || bonus1.reward !== 10 || bonus1.streakDay !== 1) {
+  fail(`Klaim check-in pertama salah: ${JSON.stringify(bonus1)}`);
+}
 const bonus2Promise = nextMessage(room, "bonus_result");
 room.send("bonus_claim", {});
 const bonus2 = await bonus2Promise;
-if (!bonus2 || bonus2.ok) fail("Klaim bonus kedua di hari yang sama harusnya ditolak");
+if (!bonus2 || bonus2.ok) fail("Klaim check-in kedua di hari yang sama harusnya ditolak");
 const me2 = await api("/auth/me", null, token);
-if (me2.data.balance !== 600) fail(`Saldo setelah bonus harusnya 600, terbaca ${me2.data.balance}`);
-console.log("✅ Bonus harian +100 KC (500 → 600); klaim kedua di hari yang sama ditolak");
+if (me2.data.balance !== 510) fail(`Saldo setelah check-in harusnya 510, terbaca ${me2.data.balance}`);
+console.log("✅ Check-in streak Hari 1 +10 KC (500 → 510); klaim kedua di hari yang sama ditolak");
 
 // 3. Tamu ditolak bonus & pekerjaan.
 const guestClient = new Client(WS);
@@ -144,37 +148,37 @@ for (const point of CLEANUP_POINTS) {
 const done = await donePromise;
 if (!done || done.earned !== 180) fail(`Penyelesaian sif salah: ${JSON.stringify(done)}`);
 const me3 = await api("/auth/me", null, token);
-if (me3.data.balance !== 780) fail(`Saldo setelah gaji harusnya 780, terbaca ${me3.data.balance}`);
-console.log("✅ 5 titik dikunjungi — gaji 180 KC dibayar (600 → 780)");
+if (me3.data.balance !== 690) fail(`Saldo setelah gaji harusnya 690, terbaca ${me3.data.balance}`);
+console.log("✅ 5 titik dikunjungi — gaji 180 KC dibayar (510 → 690)");
 
 // Dibayar tepat sekali: tunggu sebentar, saldo tidak boleh berubah lagi.
 await wait(2000);
 const me4 = await api("/auth/me", null, token);
-if (me4.data.balance !== 780) fail(`Saldo berubah lagi setelah sif selesai (${me4.data.balance}) — gaji dobel?`);
-console.log("✅ Gaji dibayar tepat sekali (saldo stabil di 780 KC)");
+if (me4.data.balance !== 690) fail(`Saldo berubah lagi setelah sif selesai (${me4.data.balance}) — gaji dobel?`);
+console.log("✅ Gaji dibayar tepat sekali (saldo stabil di 690 KC)");
 
 // 5. Cooldown: mulai pekerjaan yang sama lagi harus ditolak.
 const cdPromise = nextMessage(room, "job_result");
 room.send("job_start", { jobId: "kebersihan" });
 const cd = await cdPromise;
 if (!cd || cd.ok) fail("job_start saat cooldown harusnya ditolak");
-console.log("✅ job_start saat cooldown (10 menit) ditolak server");
+console.log("✅ job_start saat cooldown (120 menit, per-pekerjaan Tahap 6B) ditolak server");
 
 // 6. Putus, masuk lagi — saldo persisten.
 await room.leave();
 const login = await api("/auth/login", { username: user, password: PASS });
 if (!login.data.token) fail("Login ulang gagal");
 const me5 = await api("/auth/me", null, login.data.token);
-if (me5.data.balance !== 780) fail(`Saldo setelah login ulang harusnya 780, terbaca ${me5.data.balance}`);
+if (me5.data.balance !== 690) fail(`Saldo setelah login ulang harusnya 690, terbaca ${me5.data.balance}`);
 const client2 = new Client(WS);
 const room2 = await client2.joinOrCreate("kota", { name: "UjiEko", token: login.data.token });
 const jobs2Promise = nextMessage(room2, "jobs");
 room2.send("jobs_get", {});
 const jobs2 = await jobs2Promise;
-if (!jobs2 || jobs2.balance !== 780) fail(`Saldo di sesi baru = ${jobs2?.balance}, harusnya 780`);
-if (jobs2.bonusAvailable) fail("Bonus harusnya sudah tidak tersedia (sudah diklaim hari ini)");
+if (!jobs2 || jobs2.balance !== 690) fail(`Saldo di sesi baru = ${jobs2?.balance}, harusnya 690`);
+if (jobs2.bonusAvailable) fail("Check-in harusnya sudah tidak tersedia (sudah diklaim hari ini)");
 await room2.leave();
-console.log("✅ Saldo 780 KC persisten setelah keluar & masuk lagi; status bonus ikut tersimpan");
+console.log("✅ Saldo 690 KC persisten setelah keluar & masuk lagi; status check-in ikut tersimpan");
 
-console.log("🎉 SEMUA UJI TAHAP 5 LULUS — ekonomi KC: saldo awal, bonus harian, gaji pekerjaan, cooldown, anti-tamu, persistensi.");
+console.log("🎉 SEMUA UJI EKONOMI LULUS — saldo awal, check-in streak Hari 1 (+10 KC), gaji pekerjaan, cooldown per-pekerjaan, anti-tamu, persistensi.");
 process.exit(0);
