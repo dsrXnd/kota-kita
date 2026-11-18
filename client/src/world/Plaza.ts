@@ -608,5 +608,26 @@ export class Plaza {
       position: new THREE.Vector3(-3.6, 0, 14.5),
       radius: 3.2,
     });
+
+    // Kios WC bersih berbayar (Tahap 6B) — titiknya HARUS sama dengan
+    // WC_PAID_POINT di server (server/src/economy/economy.ts): (6, 16).
+    // Isi ulang kebelet dilakukan lewat panel kebutuhan (tombol 🚽 WC Bersih).
+    const wc = new THREE.Group();
+    wc.position.set(6, 0, 16);
+    const wcBody = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.5, 1.6), mat(0x9db8d2));
+    wcBody.position.y = 1.25;
+    wcBody.castShadow = true;
+    wc.add(wcBody);
+    const wcRoof = new THREE.Mesh(new THREE.ConeGeometry(1.6, 0.8, 4), mat(COLORS.roof));
+    wcRoof.position.y = 2.9;
+    wcRoof.rotation.y = Math.PI / 4;
+    wc.add(wcRoof);
+    const wcSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.9, 0.55),
+      new THREE.MeshBasicMaterial({ map: signTexture("WC BERSIH", "#3b4a6b") })
+    );
+    wcSign.position.set(0, 2.1, 0.82);
+    wc.add(wcSign);
+    this.group.add(wc);
   }
 }
