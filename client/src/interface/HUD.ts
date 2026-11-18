@@ -7,7 +7,9 @@ import type {
   NeedsInfo,
   LapakSaleInfo,
   CityPayload,
+  QuestInfo,
 } from "../multiplayer/Network";
+import { listPhotos, deletePhoto, type GalleryPhoto } from "./Gallery";
 
 export interface AuthIntent {
   mode: "login" | "register" | "guest" | "account";
@@ -191,6 +193,10 @@ export class HUD {
   private cityTimer = 0;
   private lastCity: CityPayload | null = null;
   private lastJobs: JobsPayload | null = null;
+  private lastQuests: QuestInfo[] = [];
+  private galleryPhotos: GalleryPhoto[] = [];
+  private galleryCurrentId: number | null = null;
+  private seasonStyleShown = "";
   private activeShifts: ShiftInfo[] = [];
   private lastNeeds: NeedsInfo | null = null;
   private authMode: "login" | "register" | "guest" = "login";
@@ -359,6 +365,34 @@ export class HUD {
       window.clearInterval(this.cityTimer);
     });
 
+    // Galeri Foto perangkat (Tahap 9): foto mode foto yang tersimpan di
+    // IndexedDB perangkat ini — bukan unggahan server.
+    el<HTMLButtonElement>("btn-gallery").addEventListener("click", () => void this.openGallery());
+    el<HTMLButtonElement>("btn-gallery-close").addEventListener("click", () => {
+      el("gallery-panel").classList.add("hidden");
+      el("gallery-viewer").classList.add("hidden");
+    });
+    el<HTMLButtonElement>("btn-gallery-back").addEventListener("click", () => {
+      el("gallery-viewer").classList.add("hidden");
+    });
+    el<HTMLButtonElement>("btn-gallery-download").addEventListener("click", () => {
+      const photo = this.galleryPhotos.find((p) => p.id === this.galleryCurrentId);
+      if (!photo) return;
+      const a = document.createElement("a");
+      a.href = photo.dataUrl;
+      a.download = `kota-kita-${photo.id}.png`;
+      a.click();
+    });
+    el<HTMLButtonElement>("btn-gallery-delete").addEventListener("click", () => {
+      void (async () => {
+        if (this.galleryCurrentId === null) return;
+        const ok = await deletePhoto(this.galleryCurrentId);
+        this.toast(ok ? "Foto dihapus dari galeri perangkat ini 🗑️" : "Foto tidak bisa dihapus (penyimpanan tidak tersedia).");
+        el("gallery-viewer").classList.add("hidden");
+        await this.refreshGalleryGrid();
+      })();
+    });
+
     // Chat.
     const panel = el("chat-panel");
     el<HTMLButtonElement>("btn-chat").addEventListener("click", () => {
@@ -479,6 +513,7 @@ export class HUD {
   renderJobs(payload: JobsPayload) {
     this.lastJobs = payload;
     this.activeShifts = payload.actives ?? [];
+    this.lastQuests = payload.quests ?? [];
     if (payload.balance !== null) this.setBalance(payload.balance);
     this.renderJobsPanel();
   }
@@ -487,6 +522,52 @@ export class HUD {
     this.activeShifts = update.actives ?? [];
     if (this.lastJobs) this.lastJobs.actives = this.activeShifts;
     this.renderJobsPanel();
+  }
+
+  /** Pembaruan quest dari server (Tahap 9): kemajuan berubah / hadiah dibayar. */
+  renderQuests(quests: QuestInfo[]) {
+    this.lastQuests = quests ?? [];
+    if (this.lastJobs) this.lastJobs.quests = this.lastQuests;
+    this.renderJobsPanel();
+  }
+
+  /** Gambar daftar quest harian ke panel pekerjaan (angka & hadiah dari server). */
+  private renderQuestList() {
+    const box = document.getElementById("jobs-quests");
+    if (!box) return;
+    box.innerHTML = "";
+    if (!this.lastJobs || this.lastJobs.guest) {
+      const p = document.createElement("p");
+      p.className = "quest-note";
+      p.textContent = "Quest harian khusus warga yang masuk dengan akun — tamu tidak punya kemajuan quest.";
+      box.appendChild(p);
+      return;
+    }
+    if (this.lastQuests.length === 0) {
+      const p = document.createElement("p");
+      p.className = "quest-note";
+      p.textContent = "Memuat quest harian…";
+      box.appendChild(p);
+      return;
+    }
+    for (const q of this.lastQuests) {
+      const row = document.createElement("div");
+      row.className = "quest-row" + (q.done ? " done" : "");
+      const info = document.createElement("div");
+      info.className = "grow";
+      const title = document.createElement("div");
+      title.className = "job-title";
+      title.textContent = `${q.icon} ${q.name} — 🪙 ${q.reward} KC`;
+      const desc = document.createElement("div");
+      desc.className = "job-desc";
+      desc.textContent = q.desc;
+      info.append(title, desc);
+      const prog = document.createElement("span");
+      prog.className = "quest-progress";
+      prog.textContent = q.done ? `✅ Selesai (${q.progress}/${q.target})` : `${q.progress}/${q.target}`;
+      row.append(info, prog);
+      box.appendChild(row);
+    }
   }
 
   private renderJobsPanel() {
@@ -536,8 +617,7 @@ export class HUD {
     }
 
     listBox.innerHTML = "";
-    for (const job of data.jobs) {
-      const row = document.createElement("div");
+    for (const job of data.jobs) {      const row = document.createElement("div");
       row.className = "job-row";
       const info = document.createElement("div");
       info.className = "grow";
@@ -596,6 +676,9 @@ export class HUD {
       }
       listBox.appendChild(row);
     }
+
+    // Quest sosial harian (Tahap 9) — di bawah daftar pekerjaan.
+    this.renderQuestList();
   }
 
   // ---------- Kebutuhan hidup & waktu dunia (Tahap 6B) ----------
@@ -984,6 +1067,81 @@ export class HUD {
         newsBox.appendChild(row);
       }
     }
+  }
+
+  // ---------- Tahap 9: banner event, musim & galeri ----------
+
+  /** Banner event komunitas aktif (dari state server); null menyembunyikannya. */
+  setEventBanner(event: { type: string; name: string; endsAt: number } | null) {
+    const banner = document.getElementById("event-banner");
+    if (!banner) return;
+    if (!event) {
+      banner.classList.add("hidden");
+      return;
+    }
+    const left = Math.max(0, event.endsAt - Date.now());
+    const totalSec = Math.ceil(left / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    banner.textContent = `${event.name} sedang berlangsung di Plaza Utama — berakhir dalam ${m}:${String(s).padStart(2, "0")}`;
+    banner.classList.remove("hidden");
+  }
+
+  /**
+   * Editor avatar: chip gaya musiman hanya ditawarkan saat server bilang
+   * musimnya aktif. Chip yang sedang terpilih TIDAK disembunyikan walau
+   * musim berganti — gaya yang sudah terpasang tetap terpasang.
+   */
+  setSeason(style: string, label: string) {
+    if (style === this.seasonStyleShown) return;
+    this.seasonStyleShown = style;
+    document.querySelectorAll<HTMLButtonElement>("#shirtstyle-chips .seasonal-chip").forEach((chip) => {
+      chip.classList.toggle("hidden", chip.dataset.season !== style);
+    });
+    const note = document.getElementById("season-note");
+    if (note) {
+      note.textContent = style
+        ? `Musim spesial sedang aktif: ${label} — gaya baju musimannya bisa dipilih di Model Baju (gratis, terbatas waktu).`
+        : "";
+      note.classList.toggle("hidden", !style);
+    }
+  }
+
+  /** Buka panel galeri & muat foto perangkat (terbaru di depan). */
+  async openGallery() {
+    el("gallery-panel").classList.remove("hidden");
+    el("gallery-viewer").classList.add("hidden");
+    await this.refreshGalleryGrid();
+  }
+
+  private async refreshGalleryGrid() {
+    const grid = el("gallery-grid");
+    grid.innerHTML = "";
+    this.galleryPhotos = await listPhotos();
+    el("gallery-empty").classList.toggle("hidden", this.galleryPhotos.length > 0);
+    for (const photo of this.galleryPhotos) {
+      const btn = document.createElement("button");
+      btn.className = "gallery-thumb";
+      const img = document.createElement("img");
+      img.src = photo.dataUrl;
+      img.alt = `Foto ${new Date(photo.ts).toLocaleString("id-ID")}`;
+      const caption = document.createElement("span");
+      caption.textContent = new Date(photo.ts).toLocaleString("id-ID", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      btn.append(img, caption);
+      btn.addEventListener("click", () => this.showGalleryPhoto(photo));
+      grid.appendChild(btn);
+    }
+  }
+
+  private showGalleryPhoto(photo: GalleryPhoto) {
+    this.galleryCurrentId = photo.id;
+    el<HTMLImageElement>("gallery-img").src = photo.dataUrl;
+    el("gallery-viewer").classList.remove("hidden");
   }
 
   // ---------- Umum ----------
