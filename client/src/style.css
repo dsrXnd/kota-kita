@@ -161,7 +161,8 @@ body {
   gap: 4px;
 }
 #conn-status,
-#player-count {
+#player-count,
+#balance-chip {
   background: rgba(16, 24, 34, 0.68);
   color: #fff;
   font-size: 13px;
@@ -169,6 +170,9 @@ body {
   padding: 6px 11px;
   border-radius: 999px;
   width: fit-content;
+}
+#balance-chip {
+  background: rgba(122, 90, 20, 0.78);
 }
 .top-right {
   display: flex;
@@ -462,6 +466,107 @@ body {
   width: 100%;
   margin-top: 14px;
   border-radius: 999px;
+}
+
+/* ---------- Panel pekerjaan (Tahap 5) ---------- */
+#jobs-panel {
+  position: fixed;
+  top: calc(66px + env(safe-area-inset-top));
+  right: calc(10px + env(safe-area-inset-right));
+  z-index: 42;
+  width: min(330px, 88vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #fffdf7;
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+}
+#jobs-panel h3 {
+  color: #20303f;
+  margin-bottom: 8px;
+}
+#jobs-balance {
+  font-size: 14px;
+  font-weight: 700;
+  color: #20303f;
+  background: #f4efe4;
+  border-radius: 10px;
+  padding: 9px 11px;
+}
+#btn-claim-bonus {
+  width: 100%;
+  margin-top: 10px;
+  padding: 11px;
+  border: none;
+  border-radius: 12px;
+  background: #e3b23c;
+  color: #20303f;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+#jobs-active {
+  margin-top: 12px;
+  background: #e8f4f1;
+  border: 2px solid #2e8c83;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+#jobs-active-title {
+  font-weight: 800;
+  color: #20303f;
+  font-size: 14px;
+}
+#jobs-active-progress {
+  font-size: 14px;
+  color: #40505c;
+  margin: 4px 0 8px;
+}
+#btn-job-cancel {
+  padding: 8px 14px;
+  border: 2px solid #c0392b;
+  border-radius: 999px;
+  background: #fff;
+  color: #c0392b;
+  font-weight: 700;
+  cursor: pointer;
+}
+.job-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 0;
+  border-bottom: 1px solid #eee5d3;
+  color: #20303f;
+}
+.job-row .grow {
+  flex: 1;
+  min-width: 0;
+}
+.job-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+.job-desc {
+  font-size: 12px;
+  color: #7a8794;
+  line-height: 1.4;
+}
+.job-row .mini-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+#btn-jobs-close {
+  width: 100%;
+  margin-top: 14px;
+  padding: 9px 14px;
+  border: none;
+  border-radius: 999px;
+  background: #2e8c83;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 /* ---------- Kartu interaksi & toast ---------- */

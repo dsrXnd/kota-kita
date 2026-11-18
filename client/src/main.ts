@@ -201,6 +201,18 @@ const hud = new HUD({
     network.requestFriends();
     refreshNearby();
   },
+  onJobsOpened: () => {
+    network.requestJobs();
+  },
+  onClaimBonus: () => {
+    network.claimBonus();
+  },
+  onStartJob: (jobId) => {
+    network.startJob(jobId);
+  },
+  onCancelJob: () => {
+    network.cancelJob();
+  },
 });
 
 network.onChat = (msg) => {
@@ -215,6 +227,29 @@ network.onChat = (msg) => {
 network.onFriends = (list) => hud.renderFriends(list);
 network.onFriendsResult = (_ok, message) => hud.toast(message);
 network.onReportResult = () => hud.toast("Laporan terkirim ke server. Terima kasih sudah menjaga kota 🙏");
+
+// Ekonomi (Tahap 5): semua angka datang dari server; di sini hanya ditampilkan.
+network.onBalance = (balance) => hud.setBalance(balance);
+network.onJobs = (payload) => hud.renderJobs(payload);
+network.onBonusResult = (ok, message) => {
+  hud.toast(message, 3400);
+  if (ok) sound.click();
+  network.requestJobs(); // segarkan status bonus & saldo di panel
+};
+network.onJobResult = (ok, message) => {
+  hud.toast(message, 3400);
+  network.requestJobs(); // segarkan daftar (status sif/cooldown) dari server
+};
+network.onJobUpdate = (update) => {
+  hud.renderJobUpdate(update);
+  if (update.earned) {
+    hud.toast(update.message ?? `Sif selesai! +${update.earned} KC 🎉`, 4200);
+    sound.click();
+    network.requestJobs();
+  } else if (update.message) {
+    hud.toast(update.message, 3200);
+  }
+};
 
 function refreshNearby() {
   const players = network.players;
@@ -280,6 +315,9 @@ async function startGame(p: Profile, auth: AuthIntent) {
         : `Selamat datang di KOTA KITA, ${finalProfile.name}! 🏙️`
     );
     network.requestFriends();
+    // Ekonomi: ambil saldo & status pekerjaan dari server (tamu: chip "—").
+    if (accountName) network.requestJobs();
+    else hud.setBalance(null);
     refreshNearby();
   } else {
     hud.setStatus("Offline — server belum menyala, mode sendiri", false);
