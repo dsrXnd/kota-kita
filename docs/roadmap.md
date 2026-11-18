@@ -143,6 +143,21 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
 
 **Selesai bila:** setiap sub-fitur di atas lolos uji otomatisnya masing-masing + regresi penuh (2 klien, akun, ekonomi, kavling, usaha, voting) tetap hijau.
 
+## Tahap 10 — Polesan Hasil Tes Main ✅ (SELESAI 18 Nov 2026)
+
+Lahir dari tes main pertama pemilik game: panel pekerjaan dirombak agar jelas & adil.
+
+- [x] **Pilihan pekerjaan**: tiap akun memilih tepat 2 pekerjaan sebagai miliknya — pilihan pertama gratis, **ganti pilihan 500 KC terbakar**; `job_start` di luar pilihan ditolak server; cooldown menempel pada pekerjaan (tidak pernah reset oleh ganti pilihan)
+- [x] **Statistik pekerjaan per akun** (selesai ×N, gagal ×N, total KC dari gaji saja) di payload & panel — penghitungan mulai Tahap 10, tanpa riwayat mundur
+- [x] **Tujuan sif di payload + panah penunjuk** di tengah-bawah layar: tujuan aktif terdekat, label + jarak meter, berputar mengikuti kamera
+- [x] **Status pekerjaan hidup** di panel: Sedang sif / Siap / cooldown yang berdetak tiap detik (tersinkron ulang tiap payload)
+- [x] **Kartu hasil sif**: berhasil ("+gaji KC" + cooldown dimulai) / gagal (alasan), suara synth, dan reaksi avatar lewat emote biasa (berhasil `clap`, gagal `sit`)
+- [x] **Chip siang/malam** dengan hitung mundur ke pergantian fase (siklus server 24 menit: 16 siang / 8 malam)
+- [x] **Tutorial masuk kota** sekali per perangkat (6 langkah singkat, bisa dilewati, navigasi Lanjut/Kembali) + tombol ❓ permanen untuk membukanya lagi
+- [x] **HUD dirapikan**: kelompok kiri-atas jadi tumpukan vertikal rapi — teks status tidak lagi menimpa strip kebutuhan; bar ikon membungkus aman di layar ±360 px
+
+**Selesai bila:** uji otomatis Tahap 10 (`test:10`) lulus + regresi penuh (build klien+server, 2 klien, akun, ekonomi, kavling, 6B, pasar, kota, tahap 9, beban 50) tetap hijau. ✅ Terpenuhi 18 Nov 2026.
+
 ## Jalur Lintas Tahap (berjalan paralel, bukan tahap tersendiri)
 
 - **Hosting permanen:** keputusan kartu user (Render/Northflank siap) — begitu aktif, alamat Pages Tahap 5 diarahkan ke server permanen dan uji HP RAM 3 GB dilakukan dari HP user
