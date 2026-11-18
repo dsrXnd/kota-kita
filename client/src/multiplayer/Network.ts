@@ -64,6 +64,20 @@ export interface JobUpdate {
   earned?: number;
 }
 
+// ---------- Perumahan (Tahap 6) ----------
+// Kepemilikan dibaca dari state room (publik, tersinkron server); perintah
+// klaim/bangun/teleport dikirim sebagai pesan dan divalidasi server.
+
+export interface PlotInfo {
+  owner: string;
+  house: number;
+}
+
+export interface PlotResult {
+  ok: boolean;
+  message: string;
+}
+
 /**
  * Alamat server multiplayer:
  *  1. ?server=ws://... di URL (paling fleksibel), atau
@@ -103,6 +117,8 @@ export class Network {
   onJobs: ((payload: JobsPayload) => void) | null = null;
   onJobResult: ((ok: boolean, message: string) => void) | null = null;
   onJobUpdate: ((update: JobUpdate) => void) | null = null;
+  onPlotResult: ((result: PlotResult) => void) | null = null;
+  onHomeResult: ((result: PlotResult) => void) | null = null;
 
   async connect(profile: Profile, token?: string | null): Promise<boolean> {
     try {
@@ -130,6 +146,8 @@ export class Network {
         this.onJobResult?.(data.ok, data.message)
       );
       this.room.onMessage("job_update", (data: JobUpdate) => this.onJobUpdate?.(data));
+      this.room.onMessage("plot_result", (data: PlotResult) => this.onPlotResult?.(data));
+      this.room.onMessage("home_result", (data: PlotResult) => this.onHomeResult?.(data));
       this.room.onLeave(() => {
         this.connected = false;
       });
@@ -153,6 +171,18 @@ export class Network {
 
   get playerCount(): number {
     return this.players?.size ?? 0;
+  }
+
+  /** State kavling Kampung Kita dari server: MapSchema plotId -> { owner, house }. */
+  get plots(): Map<string, PlotInfo> | null {
+    if (!this.room) return null;
+    return (this.room.state as any)?.plots ?? null;
+  }
+
+  /** Jumlah rumah berdiri di kota (dari state server). */
+  get housesBuilt(): number {
+    if (!this.room) return 0;
+    return Number((this.room.state as any)?.housesBuilt ?? 0);
   }
 
   sendInput(x: number, z: number, sprint: boolean, jump: boolean) {
@@ -204,6 +234,19 @@ export class Network {
 
   cancelJob() {
     if (this.connected && this.room) this.room.send("job_cancel", {});
+  }
+
+  // ---------- Perumahan (Tahap 6) ----------
+  claimPlot(plotId: string) {
+    if (this.connected && this.room) this.room.send("plot_claim", { plotId });
+  }
+
+  buildHouse(tier: number) {
+    if (this.connected && this.room) this.room.send("plot_build", { tier });
+  }
+
+  goHome() {
+    if (this.connected && this.room) this.room.send("home", {});
   }
 
   disconnect() {
