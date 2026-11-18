@@ -18,9 +18,29 @@ import {
   jakartaDayKey,
   type JobDef,
 } from "../economy/economy";
+import {
+  PLOTS,
+  PLOT_BY_ID,
+  PLOT_PRICE,
+  HOUSES,
+  HOUSE_PRICE,
+  houseAllowedOn,
+  houseBox,
+  homePoint,
+  plots as plotStore,
+} from "../housing/housing";
+
+/** Keadaan publik satu kavling Kampung Kita (Tahap 6) — cukup untuk menggambar distrik yang sama di semua klien. */
+export class PlotState extends Schema {
+  @type("string") owner: string = ""; // nama pengguna akun pemilik ("" = kosong)
+  @type("number") house: number = 0; // 0 = tanah kosong, 1..3 = tingkat rumah
+}
 
 export class KotaState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>();
+  @type({ map: PlotState }) plots = new MapSchema<PlotState>();
+  /** Jumlah rumah yang berdiri di kota (statistik awal untuk Tahap 8). */
+  @type("number") housesBuilt: number = 0;
 }
 
 interface InputData {
@@ -78,7 +98,12 @@ export const WALK_SPEED = 4;
 export const RUN_SPEED = 7;
 export const GRAVITY = 22;
 export const JUMP_VELOCITY = 8.2;
-const WORLD_BOUND = 42; // pemain ditahan di kotak ±42 m
+// Batas dunia: plaza lama ±42 m, Kampung Kita memanjang ke timur (Tahap 6).
+// HARUS sama dengan batas di client (main.ts).
+const BOUND_MIN_X = -42;
+const BOUND_MAX_X = 136;
+const BOUND_MIN_Z = -42;
+const BOUND_MAX_Z = 42;
 const FOUNTAIN_RADIUS = 3.6; // lingkaran tabrakan air mancur di (0,0)
 const CHAT_MAX = 120;
 const CHAT_MIN_INTERVAL_MS = 800;
@@ -121,10 +146,14 @@ export class KotaRoom extends Room<KotaState> {
   private shifts = new Map<string, ShiftState>();
   /** sessionId -> kapan terakhir ringkasan sif dikirim (pembaruan berkala 1 detik). */
   private lastJobSentAt = new Map<string, number>();
+  /** Kotak tabrakan rumah yang sedang berdiri (Tahap 6) — diturunkan dari data kavling, dibangun ulang tiap ada perubahan. */
+  private houseBoxes: Array<readonly [number, number, number, number]> = [];
 
   onCreate() {
     this.setState(new KotaState());
     this.maxClients = 50;
+    // Kampung Kita (Tahap 6): muat kepemilikan kavling persisten ke state publik.
+    this.syncPlotsState();
 
     this.onMessage("input", (client, data: Partial<InputData>) => {
       // Server tidak memercayai klien: hanya arah yang diterima,
@@ -282,6 +311,89 @@ export class KotaRoom extends Room<KotaState> {
       }
     });
 
+    // --- Perumahan (Tahap 6): klaim kavling, bangun rumah, teleport pulang ---
+    // Semua validasi & pemotongan saldo terjadi di server; client hanya meminta.
+    this.onMessage("plot_claim", (client, data: { plotId?: unknown }) => {
+      const reject = (message: string) => client.send("plot_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Klaim kavling hanya untuk pemain yang masuk dengan akun. Tamu tidak punya saldo.");
+      const def = typeof data?.plotId === "string" ? PLOT_BY_ID.get(data.plotId) : undefined;
+      if (!def) return reject("Kavling tidak dikenal.");
+      if (plotStore.get(def.id)) return reject(`Kavling ${def.tier} No. ${def.number} sudah ada pemiliknya. Cari yang masih kosong ya.`);
+      const mine = plotStore.plotOfAccount(me);
+      if (mine) {
+        const owned = PLOT_BY_ID.get(mine);
+        return reject(`Kamu sudah punya Kavling ${owned?.tier} No. ${owned?.number}. Satu akun hanya boleh satu kavling.`);
+      }
+      const price = PLOT_PRICE[def.tier];
+      const paid = accounts.spendKC(me, price, `Klaim Kavling ${def.tier} No. ${def.number}`);
+      if (!paid.ok) return reject(paid.error ?? "Saldo tidak cukup.");
+      const ownerName = accounts.getUser(me)?.username ?? me;
+      plotStore.claim(def.id, me, ownerName);
+      this.syncPlotsState();
+      client.send("plot_result", {
+        ok: true,
+        message: `Selamat! Kavling ${def.tier} No. ${def.number} sekarang milikmu 🎉 (−${price} KC)`,
+      });
+      client.send("balance", { balance: paid.balance });
+    });
+
+    this.onMessage("plot_build", (client, data: { tier?: unknown }) => {
+      const reject = (message: string) => client.send("plot_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Bangun rumah hanya untuk pemain yang masuk dengan akun.");
+      const myPlotId = plotStore.plotOfAccount(me);
+      if (!myPlotId) return reject("Kamu belum punya kavling. Klaim kavling dulu di Kampung Kita ya.");
+      const def = PLOT_BY_ID.get(myPlotId);
+      const rec = plotStore.get(myPlotId);
+      if (!def || !rec) return reject("Data kavlingmu tidak ditemukan.");
+      const tier = typeof data?.tier === "number" ? data.tier : NaN;
+      const house = HOUSES[tier];
+      if (!house) return reject("Jenis rumah tidak dikenal.");
+      if (tier <= rec.house) {
+        return reject(
+          rec.house === tier
+            ? `${house.name} sudah berdiri di kavlingmu.`
+            : "Rumah hanya bisa ditingkatkan ke yang lebih tinggi — tidak bisa turun tingkat."
+        );
+      }
+      if (!houseAllowedOn(def, tier)) {
+        return reject(`${house.name} hanya boleh dibangun di Kavling 2 (petak premium). Kavlingmu Kavling ${def.tier}.`);
+      }
+      const cost = house.price - HOUSE_PRICE[rec.house];
+      const paid = accounts.spendKC(me, cost, rec.house > 0 ? `Upgrade ke ${house.name}` : `Bangun ${house.name}`);
+      if (!paid.ok) return reject(paid.error ?? "Saldo tidak cukup.");
+      plotStore.setHouse(myPlotId, tier);
+      this.syncPlotsState();
+      client.send("plot_result", {
+        ok: true,
+        message: `${house.name} berdiri di Kavling ${def.tier} No. ${def.number}! 🏠 (−${cost} KC)`,
+      });
+      client.send("balance", { balance: paid.balance });
+    });
+
+    this.onMessage("home", (client) => {
+      const reject = (message: string) => client.send("home_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Fitur Ke Rumahku hanya untuk pemain yang masuk dengan akun.");
+      const myPlotId = plotStore.plotOfAccount(me);
+      if (!myPlotId) return reject("Kamu belum punya kavling — belum ada rumah untuk pulang. Klaim dulu di Kampung Kita ya!");
+      const def = PLOT_BY_ID.get(myPlotId);
+      const rec = plotStore.get(myPlotId);
+      const player = this.state.players.get(client.sessionId);
+      if (!def || !rec || !player) return reject("Data rumahmu tidak ditemukan.");
+      // Teleport otoritatif: posisi resmi pemain dipindah server, sif tidak terpengaruh.
+      const point = homePoint(def, rec.house);
+      player.x = point.x;
+      player.z = point.z;
+      player.y = 0;
+      this.verticalVel.set(client.sessionId, 0);
+      client.send("home_result", {
+        ok: true,
+        message: `Selamat datang di rumahmu, Kavling ${def.tier} No. ${def.number} 🏠`,
+      });
+    });
+
     // Simulasi gerak otoritatif, 20x per detik.
     this.setSimulationInterval((deltaMs) => this.simulate(deltaMs / 1000), 50);
   }
@@ -358,6 +470,27 @@ export class KotaRoom extends Room<KotaState> {
         lastOnline: friend?.lastOnline ?? 0,
       };
     });
+  }
+
+  // ---------- Perumahan (Tahap 6) ----------
+
+  /** Salin kepemilikan persisten ke state publik + bangun ulang daftar kotak tabrakan rumah. */
+  private syncPlotsState() {
+    const boxes: Array<readonly [number, number, number, number]> = [];
+    for (const def of PLOTS) {
+      const rec = plotStore.get(def.id);
+      let entry = this.state.plots.get(def.id);
+      if (!entry) {
+        entry = new PlotState();
+        this.state.plots.set(def.id, entry);
+      }
+      entry.owner = rec?.ownerName ?? "";
+      entry.house = rec?.house ?? 0;
+      const box = houseBox(def, entry.house);
+      if (box) boxes.push(box);
+    }
+    this.houseBoxes = boxes;
+    this.state.housesBuilt = plotStore.houseCount();
   }
 
   // ---------- Ekonomi (Tahap 5) ----------
@@ -514,8 +647,8 @@ export class KotaRoom extends Room<KotaState> {
       this.verticalVel.set(sessionId, vy);
 
       // Batas dunia.
-      player.x = Math.max(-WORLD_BOUND, Math.min(WORLD_BOUND, player.x));
-      player.z = Math.max(-WORLD_BOUND, Math.min(WORLD_BOUND, player.z));
+      player.x = Math.max(BOUND_MIN_X, Math.min(BOUND_MAX_X, player.x));
+      player.z = Math.max(BOUND_MIN_Z, Math.min(BOUND_MAX_Z, player.z));
 
       // Tabrakan air mancur: dorong keluar lingkaran.
       const distFountain = Math.hypot(player.x, player.z);
@@ -525,8 +658,8 @@ export class KotaRoom extends Room<KotaState> {
         player.z *= push;
       }
 
-      // Tabrakan bangunan (AABB sederhana).
-      resolveCollisions(player);
+      // Tabrakan bangunan (AABB sederhana) + rumah pemain yang berdiri (Tahap 6).
+      resolveCollisions(player, this.houseBoxes);
 
       // Animasi. Emote yang masih aktif menang, kecuali pemain sedang di udara.
       const emote = this.emoteUntil.get(sessionId);

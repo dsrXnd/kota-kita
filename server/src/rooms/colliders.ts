@@ -25,9 +25,10 @@ export const COLLIDERS: ReadonlyArray<readonly [number, number, number, number]>
 
 const PLAYER_RADIUS = 0.35;
 
-/** Dorong posisi keluar dari semua kotak bangunan (sumbu penetrasi terkecil). */
-export function resolveCollisions(pos: { x: number; z: number }): void {
-  for (const [minX, maxX, minZ, maxZ] of COLLIDERS) {
+type Box = readonly [number, number, number, number];
+
+function resolveAgainst(pos: { x: number; z: number }, boxes: ReadonlyArray<Box>): void {
+  for (const [minX, maxX, minZ, maxZ] of boxes) {
     const nearX = Math.max(minX - PLAYER_RADIUS, Math.min(pos.x, maxX + PLAYER_RADIUS));
     const nearZ = Math.max(minZ - PLAYER_RADIUS, Math.min(pos.z, maxZ + PLAYER_RADIUS));
     const dx = pos.x - nearX;
@@ -45,4 +46,10 @@ export function resolveCollisions(pos: { x: number; z: number }): void {
       else pos.z = maxZ + PLAYER_RADIUS;
     }
   }
+}
+
+/** Dorong posisi keluar dari semua kotak bangunan statis (sumbu penetrasi terkecil). */
+export function resolveCollisions(pos: { x: number; z: number }, extra: ReadonlyArray<Box> = []): void {
+  resolveAgainst(pos, COLLIDERS);
+  if (extra.length > 0) resolveAgainst(pos, extra);
 }
