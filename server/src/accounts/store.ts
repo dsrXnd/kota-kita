@@ -12,6 +12,8 @@ import {
 import {
   KC_START_BALANCE,
   JOBS,
+  JOB_CHANGE_FEE,
+  JOB_CHOOSE_COUNT,
   MAX_SKIP_PER_DAY,
   fullNeeds,
   jakartaDayKey,
@@ -45,6 +47,16 @@ export interface ProfileData {
   shirtStyle: string;
 }
 
+/** Statistik satu pekerjaan untuk satu akun (Tahap 10) — dihitung sejak Tahap 10, tanpa riwayat mundur. */
+export interface JobStatEntry {
+  /** Jumlah sif selesai (dibayar). */
+  done: number;
+  /** Jumlah sif GAGAL (antar kelewat waktu). Batal tidak dihitung. */
+  failed: number;
+  /** Total gaji KC dari pekerjaan ini (gaji saja — hadiah quest tidak ikut). */
+  earned: number;
+}
+
 /** Data ekonomi satu akun (Tahap 5 + 6B) — semua perubahan lewat metode store ini. */
 export interface EconomyData {
   /** Saldo Koin Kota (KC). */
@@ -59,6 +71,10 @@ export interface EconomyData {
   skipUsed: number;
   /** jobId -> waktu (ms) sif terakhir SELESAI — dasar cooldown, persisten agar tidak bisa diakali dengan relog. */
   jobLastDone: Record<string, number>;
+  /** 2 pekerjaan pilihan akun (Tahap 10) — hanya ini yang boleh diambil; [] = belum memilih. */
+  chosenJobs: string[];
+  /** Statistik pekerjaan per akun (Tahap 10): jobId -> { done, failed, earned }. */
+  jobStats: Record<string, JobStatEntry>;
   /** Meter kebutuhan hidup 0..100 (Tahap 6B) — hanya berkurang saat bermain. */
   needs: NeedsState;
   /** Jumlah suvenir batik yang dibeli dari lapak pemain (Tahap 7) — koleksi persisten. */
@@ -77,6 +93,8 @@ export function defaultEconomy(): EconomyData {
     skipDay: "",
     skipUsed: 0,
     jobLastDone: {},
+    chosenJobs: [],
+    jobStats: {},
     needs: fullNeeds(),
     souvenirs: 0,
     quests: emptyQuestDay(jakartaDayKey(Date.now())),
@@ -164,6 +182,20 @@ export class AccountStore {
       user.economy.skipDay ??= "";
       user.economy.skipUsed ??= 0;
       user.economy.jobLastDone ??= {};
+      // Tahap 10: pilihan pekerjaan (saring ke id sah, unik, maks. JOB_CHOOSE_COUNT)
+      // + statistik pekerjaan (sanitasi entri angka).
+      user.economy.chosenJobs = Array.isArray(user.economy.chosenJobs)
+        ? [...new Set(user.economy.chosenJobs.filter((id) => typeof id === "string" && id in JOBS))].slice(0, JOB_CHOOSE_COUNT)
+        : [];
+      if (!user.economy.jobStats || typeof user.economy.jobStats !== "object") user.economy.jobStats = {};
+      for (const [jobId, st] of Object.entries(user.economy.jobStats)) {
+        if (!(jobId in JOBS) || !st || typeof st !== "object") {
+          delete user.economy.jobStats[jobId];
+          continue;
+        }
+        const clean = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+        user.economy.jobStats[jobId] = { done: clean(st.done), failed: clean(st.failed), earned: clean(st.earned) };
+      }
       user.economy.needs ??= fullNeeds();
       user.economy.souvenirs ??= 0;
       if (!user.economy.quests || typeof user.economy.quests.day !== "string") {
@@ -411,6 +443,76 @@ export class AccountStore {
     const balance = this.applyDelta(user, pay, `Gaji: ${jobName}`);
     this.save();
     return balance;
+  }
+
+  // ---------- Pilihan & statistik pekerjaan (Tahap 10) ----------
+
+  /**
+   * Tetapkan 2 pekerjaan pilihan akun. Aturan (keputusan user):
+   * - Tepat JOB_CHOOSE_COUNT id, semuanya sah & berbeda — selain itu ditolak.
+   * - Pilihan PERTAMA gratis. Ganti pilihan (himpunan berbeda dari yang
+   *   sekarang) membakar JOB_CHANGE_FEE KC lewat applyDelta — TIDAK masuk
+   *   Kas Kota, perlakuan sama seperti biaya skip.
+   * - Pilihan yang sama persis = ditolak sebagai "tidak ada perubahan",
+   *   tanpa biaya. Saldo kurang = ditolak, tidak ada perubahan apa pun.
+   * Cooldown TIDAK disentuh di sini: cooldown terikat jobId di jobLastDone
+   * dan tetap berjalan walau pilihan diganti (anti-akalan).
+   */
+  chooseJobs(
+    usernameLower: string,
+    jobIds: unknown
+  ): { ok: boolean; balance: number; charged: number; error?: string } {
+    const user = this.db.users[usernameLower];
+    if (!user) return { ok: false, balance: 0, charged: 0, error: "Akun tidak ditemukan." };
+    const balance = user.economy.balance;
+    if (
+      !Array.isArray(jobIds) ||
+      jobIds.length !== JOB_CHOOSE_COUNT ||
+      !jobIds.every((id) => typeof id === "string" && id in JOBS) ||
+      new Set(jobIds).size !== jobIds.length
+    ) {
+      return { ok: false, balance, charged: 0, error: `Pilih tepat ${JOB_CHOOSE_COUNT} pekerjaan yang berbeda dari daftar pekerjaan.` };
+    }
+    const current = user.economy.chosenJobs ?? [];
+    const sameSet = current.length === jobIds.length && jobIds.every((id) => current.includes(id));
+    if (sameSet) {
+      return { ok: false, balance, charged: 0, error: "Itu memang pilihanmu yang sekarang — tidak ada perubahan, jadi tidak ada biaya." };
+    }
+    let charged = 0;
+    if (current.length > 0) {
+      if (balance < JOB_CHANGE_FEE) {
+        return {
+          ok: false,
+          balance,
+          charged: 0,
+          error: `Saldo tidak cukup untuk ganti pilihan — perlu ${JOB_CHANGE_FEE} KC, saldomu ${balance} KC.`,
+        };
+      }
+      this.applyDelta(user, -JOB_CHANGE_FEE, "Ganti pilihan pekerjaan");
+      charged = JOB_CHANGE_FEE;
+    }
+    user.economy.chosenJobs = [...jobIds];
+    this.save();
+    return { ok: true, balance: user.economy.balance, charged };
+  }
+
+  /** Catat satu sif SELESAI ke statistik akun (Tahap 10): done +1, earned += gaji pekerjaan itu saja. */
+  recordJobDone(usernameLower: string, jobId: string, pay: number) {
+    const user = this.db.users[usernameLower];
+    if (!user || !(jobId in JOBS)) return;
+    const st = (user.economy.jobStats[jobId] ??= { done: 0, failed: 0, earned: 0 });
+    st.done += 1;
+    st.earned += pay;
+    this.save();
+  }
+
+  /** Catat satu sif GAGAL (antar kelewat waktu) ke statistik akun (Tahap 10). Batal TIDAK dicatat. */
+  recordJobFailed(usernameLower: string, jobId: string) {
+    const user = this.db.users[usernameLower];
+    if (!user || !(jobId in JOBS)) return;
+    const st = (user.economy.jobStats[jobId] ??= { done: 0, failed: 0, earned: 0 });
+    st.failed += 1;
+    this.save();
   }
 
   /**
