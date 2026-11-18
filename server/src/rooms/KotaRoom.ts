@@ -3,6 +3,21 @@ import { Schema, MapSchema, type } from "@colyseus/schema";
 import { Player } from "../players/Player";
 import { resolveCollisions } from "./colliders";
 import { accounts, type ProfileData } from "../accounts/store";
+import {
+  JOBS,
+  KC_DAILY_BONUS,
+  JOB_COOLDOWN_MS,
+  WARKOP_POST,
+  WARKOP_STAY_MS,
+  CLEANUP_POINTS,
+  CLEANUP_RADIUS,
+  BALAI_PICKUP,
+  DELIVER_RADIUS,
+  DELIVER_TIME_MS,
+  DELIVERY_TARGETS,
+  jakartaDayKey,
+  type JobDef,
+} from "../economy/economy";
 
 export class KotaState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>();
@@ -25,6 +40,25 @@ interface JoinOptions {
   shirtStyle?: string;
   /** Token sesi akun (Tahap 3) — bila sah, profil akun dimuat & disimpan. */
   token?: string;
+}
+
+/**
+ * Keadaan satu sif yang sedang berjalan (Tahap 5) — hanya hidup di server.
+ * Kemajuan dihitung dari posisi otoritatif pemain; client tidak tahu
+ * apa-apa selain ringkasan yang dikirim lewat pesan "job_update".
+ */
+interface ShiftState {
+  jobId: string;
+  /** penjaga_warung: akumulasi ms di dalam radius pos jaga. */
+  progressMs: number;
+  /** kebersihan: titik yang sudah dikunjungi. */
+  visited: boolean[];
+  /** kurir: "pickup" lalu "deliver". */
+  phase: "pickup" | "deliver";
+  /** kurir: toko tujuan yang dipilih server. */
+  target: { name: string; x: number; z: number } | null;
+  /** kurir: batas waktu antar (ms epoch), diisi saat paket diambil. */
+  deadline: number;
 }
 
 const HAIR_STYLES = ["pendek", "panjang", "hijab", "peci", "botak"];
@@ -83,6 +117,10 @@ export class KotaRoom extends Room<KotaState> {
   private sessionAccount = new Map<string, string>();
   /** 30 chat terakhir — konteks saat ada laporan moderasi. */
   private recentChats: Array<{ name: string; text: string; ts: number }> = [];
+  /** sessionId -> sif yang sedang berjalan (Tahap 5). Maksimal 1 sif per pemain. */
+  private shifts = new Map<string, ShiftState>();
+  /** sessionId -> kapan terakhir ringkasan sif dikirim (pembaruan berkala 1 detik). */
+  private lastJobSentAt = new Map<string, number>();
 
   onCreate() {
     this.setState(new KotaState());
@@ -182,6 +220,68 @@ export class KotaRoom extends Room<KotaState> {
       }
     });
 
+    // --- Ekonomi (Tahap 5): saldo, bonus harian, pekerjaan ---
+    // Semua balasan bersifat privat (client.send) — saldo bukan data publik.
+    this.onMessage("balance_get", (client) => {
+      const me = this.sessionAccount.get(client.sessionId);
+      const eco = me ? accounts.getEconomy(me) : null;
+      if (eco) client.send("balance", { balance: eco.balance });
+    });
+
+    this.onMessage("jobs_get", (client) => {
+      client.send("jobs", this.jobsPayload(client.sessionId));
+    });
+
+    this.onMessage("bonus_claim", (client) => {
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) {
+        client.send("bonus_result", { ok: false, message: "Bonus harian hanya untuk pemain yang masuk dengan akun. Tamu tidak punya saldo." });
+        return;
+      }
+      const result = accounts.claimDailyBonus(me);
+      client.send("bonus_result", {
+        ok: result.ok,
+        balance: result.balance,
+        message: result.ok ? `Bonus harian +${KC_DAILY_BONUS} KC 🎁 Saldo sekarang ${result.balance} KC.` : result.error,
+      });
+      if (result.ok) client.send("balance", { balance: result.balance });
+    });
+
+    this.onMessage("job_start", (client, data: { jobId?: unknown }) => {
+      const reject = (message: string) => client.send("job_result", { ok: false, message });
+      const me = this.sessionAccount.get(client.sessionId);
+      if (!me) return reject("Masuk dengan akun dulu untuk bekerja — tamu tidak bisa menerima gaji.");
+      const def = typeof data?.jobId === "string" ? JOBS[data.jobId] : undefined;
+      if (!def) return reject("Pekerjaan tidak dikenal.");
+      if (this.shifts.has(client.sessionId)) {
+        return reject("Kamu sedang dalam sif lain. Selesaikan atau batalkan dulu ya.");
+      }
+      const cooldown = accounts.jobCooldownRemaining(me, def.id);
+      if (cooldown > 0) {
+        return reject(`"${def.name}" baru bisa diambil lagi ${Math.ceil(cooldown / 60000)} menit lagi (istirahat antar-sif).`);
+      }
+      const shift: ShiftState = {
+        jobId: def.id,
+        progressMs: 0,
+        visited: CLEANUP_POINTS.map(() => false),
+        phase: "pickup",
+        target:
+          def.kind === "deliver"
+            ? DELIVERY_TARGETS[Math.floor(Math.random() * DELIVERY_TARGETS.length)]
+            : null,
+        deadline: 0,
+      };
+      this.shifts.set(client.sessionId, shift);
+      client.send("job_result", { ok: true, message: `Sif dimulai: ${def.name}. Semangat! 💪` });
+      this.sendShiftUpdate(client.sessionId, this.shiftStartHint(def));
+    });
+
+    this.onMessage("job_cancel", (client) => {
+      if (this.shifts.delete(client.sessionId)) {
+        client.send("job_update", { active: null, message: "Sif dibatalkan — tidak ada gaji dan tidak ada cooldown." });
+      }
+    });
+
     // Simulasi gerak otoritatif, 20x per detik.
     this.setSimulationInterval((deltaMs) => this.simulate(deltaMs / 1000), 50);
   }
@@ -237,6 +337,9 @@ export class KotaRoom extends Room<KotaState> {
     this.emoteUntil.delete(client.sessionId);
     this.lastEmoteAt.delete(client.sessionId);
     this.lastChatAt.delete(client.sessionId);
+    // Sif yang ditinggal di tengah jalan hangus (tanpa gaji, tanpa cooldown).
+    this.shifts.delete(client.sessionId);
+    this.lastJobSentAt.delete(client.sessionId);
   }
 
   /** Daftar teman untuk satu sesi (kosong untuk tamu), lengkap dengan status online. */
@@ -255,6 +358,130 @@ export class KotaRoom extends Room<KotaState> {
         lastOnline: friend?.lastOnline ?? 0,
       };
     });
+  }
+
+  // ---------- Ekonomi (Tahap 5) ----------
+
+  private shiftStartHint(def: JobDef): string {
+    if (def.kind === "stay") return "Ke depan Warung Kopi dan berjagalah di sana.";
+    if (def.kind === "visit") return "Kunjungi kelima titik bersih-bersih di sekitar plaza.";
+    return "Ambil paketnya di teras Balai Kota dulu.";
+  }
+
+  /** Ringkasan sif untuk ditampilkan client (bukan data otoritatif — server tetap yang menilai). */
+  private shiftSnapshot(sessionId: string) {
+    const shift = this.shifts.get(sessionId);
+    if (!shift) return null;
+    const def = JOBS[shift.jobId];
+    return {
+      jobId: def.id,
+      name: def.name,
+      pay: def.pay,
+      kind: def.kind,
+      progressMs: Math.floor(shift.progressMs),
+      needMs: WARKOP_STAY_MS,
+      visitedCount: shift.visited.filter(Boolean).length,
+      totalPoints: CLEANUP_POINTS.length,
+      phase: shift.phase,
+      targetName: shift.target?.name ?? "",
+      deadline: shift.deadline,
+    };
+  }
+
+  /** Data panel pekerjaan untuk satu sesi: saldo, bonus, daftar pekerjaan + cooldown, sif aktif. */
+  private jobsPayload(sessionId: string) {
+    const me = this.sessionAccount.get(sessionId);
+    const eco = me ? accounts.getEconomy(me) : null;
+    const now = Date.now();
+    return {
+      guest: !me,
+      balance: eco ? eco.balance : null,
+      bonusAvailable: !!eco && eco.lastBonusDay !== jakartaDayKey(now),
+      bonusAmount: KC_DAILY_BONUS,
+      cooldownMs: JOB_COOLDOWN_MS,
+      jobs: Object.values(JOBS).map((def) => ({
+        id: def.id,
+        name: def.name,
+        pay: def.pay,
+        desc: def.desc,
+        cooldownRemainingMs: me ? accounts.jobCooldownRemaining(me, def.id) : 0,
+      })),
+      active: this.shiftSnapshot(sessionId),
+    };
+  }
+
+  private sendShiftUpdate(sessionId: string, message?: string) {
+    this.lastJobSentAt.set(sessionId, Date.now());
+    const client = this.clients.find((c) => c.sessionId === sessionId);
+    client?.send("job_update", { active: this.shiftSnapshot(sessionId), message });
+  }
+
+  /** Sif selesai: bayar tepat sekali lewat store, lalu kabari pemainnya. */
+  private finishShift(sessionId: string, def: JobDef) {
+    this.shifts.delete(sessionId);
+    const me = this.sessionAccount.get(sessionId);
+    const client = this.clients.find((c) => c.sessionId === sessionId);
+    if (!me || !client) return;
+    const balance = accounts.completeJob(me, def.id, def.pay, def.name);
+    client.send("job_update", {
+      active: null,
+      earned: def.pay,
+      message: `Sif "${def.name}" selesai! +${def.pay} KC 🎉`,
+    });
+    client.send("balance", { balance });
+  }
+
+  /** Penilaian kemajuan sif per tick simulasi, dari posisi otoritatif pemain. */
+  private updateShift(sessionId: string, player: Player, dt: number, now: number) {
+    const shift = this.shifts.get(sessionId);
+    if (!shift) return;
+    const def = JOBS[shift.jobId];
+    const distTo = (x: number, z: number) => Math.hypot(player.x - x, player.z - z);
+
+    if (def.kind === "stay") {
+      // Di dalam radius: waktu terakumulasi. Di luar: berhenti (tidak mengulang dari nol).
+      if (distTo(WARKOP_POST.x, WARKOP_POST.z) <= WARKOP_POST.radius) {
+        shift.progressMs += dt * 1000;
+      }
+      if (shift.progressMs >= WARKOP_STAY_MS) return this.finishShift(sessionId, def);
+    } else if (def.kind === "visit") {
+      let changed = false;
+      CLEANUP_POINTS.forEach((p, i) => {
+        if (!shift.visited[i] && distTo(p.x, p.z) <= CLEANUP_RADIUS) {
+          shift.visited[i] = true;
+          changed = true;
+        }
+      });
+      if (shift.visited.every(Boolean)) return this.finishShift(sessionId, def);
+      if (changed) {
+        this.sendShiftUpdate(sessionId, `Titik bersih-bersih ${shift.visited.filter(Boolean).length}/${CLEANUP_POINTS.length} ✓`);
+        return;
+      }
+    } else if (def.kind === "deliver" && shift.target) {
+      if (shift.phase === "pickup") {
+        if (distTo(BALAI_PICKUP.x, BALAI_PICKUP.z) <= BALAI_PICKUP.radius) {
+          shift.phase = "deliver";
+          shift.deadline = now + DELIVER_TIME_MS;
+          this.sendShiftUpdate(sessionId, `Paket diambil! Antar ke ${shift.target.name} dalam ${DELIVER_TIME_MS / 1000} detik.`);
+          return;
+        }
+      } else {
+        if (now > shift.deadline) {
+          this.shifts.delete(sessionId);
+          const client = this.clients.find((c) => c.sessionId === sessionId);
+          client?.send("job_update", { active: null, message: "Waktu antar habis — sif gagal, tidak ada gaji. Coba lagi kapan-kapan!" });
+          return;
+        }
+        if (distTo(shift.target.x, shift.target.z) <= DELIVER_RADIUS) {
+          return this.finishShift(sessionId, def);
+        }
+      }
+    }
+
+    // Ringkasan berkala (±1 detik) agar bilah kemajuan & hitung mundur client tetap segar.
+    if (now - (this.lastJobSentAt.get(sessionId) ?? 0) >= 1000) {
+      this.sendShiftUpdate(sessionId);
+    }
   }
 
   private simulate(dt: number) {
@@ -311,6 +538,9 @@ export class KotaRoom extends Room<KotaState> {
       else if (player.y > 0.05) player.anim = "jump";
       else if (moving) player.anim = input.sprint ? "run" : "walk";
       else player.anim = "idle";
+
+      // Kemajuan pekerjaan (Tahap 5) dinilai dari posisi resmi pemain ini.
+      this.updateShift(sessionId, player, dt, now);
     });
   }
 }
