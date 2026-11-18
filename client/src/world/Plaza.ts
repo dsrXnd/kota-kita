@@ -11,8 +11,10 @@ export interface Interactable {
 /**
  * Kotak tabrakan bangunan (AABB): [minX, maxX, minZ, maxZ].
  * HARUS sama dengan server (server/src/rooms/colliders.ts).
+ * Tahap 9: kotak boleh punya [minFeetY, maxFeetY] tambahan — hanya
+ * berlaku bila kaki pemain (pos.y) di rentang itu (pagar dek).
  */
-export const COLLIDERS: ReadonlyArray<readonly [number, number, number, number]> = [
+export const COLLIDERS: ReadonlyArray<ReadonlyArray<number>> = [
   [-29, -19, -35, -27],
   [-17, -7, -35, -27],
   [7, 17, -35, -27],
@@ -28,10 +30,18 @@ export const COLLIDERS: ReadonlyArray<readonly [number, number, number, number]>
 
 const PLAYER_RADIUS = 0.35;
 
-type Box = readonly [number, number, number, number];
+type Box = ReadonlyArray<number>;
 
-function resolveAgainst(pos: { x: number; z: number }, boxes: ReadonlyArray<Box>): void {
-  for (const [minX, maxX, minZ, maxZ] of boxes) {
+function resolveAgainst(pos: { x: number; z: number; y?: number }, boxes: ReadonlyArray<Box>): void {
+  const feetY = pos.y ?? 0;
+  for (const box of boxes) {
+    // Gerbang ketinggian kaki (Tahap 9) — cermin server.
+    if (box.length > 4) {
+      const minFeetY = box[4];
+      const maxFeetY = box.length > 5 ? box[5] : Number.POSITIVE_INFINITY;
+      if (feetY < minFeetY || feetY >= maxFeetY) continue;
+    }
+    const [minX, maxX, minZ, maxZ] = box;
     const nearX = Math.max(minX - PLAYER_RADIUS, Math.min(pos.x, maxX + PLAYER_RADIUS));
     const nearZ = Math.max(minZ - PLAYER_RADIUS, Math.min(pos.z, maxZ + PLAYER_RADIUS));
     const dx = pos.x - nearX;
@@ -51,7 +61,7 @@ function resolveAgainst(pos: { x: number; z: number }, boxes: ReadonlyArray<Box>
 }
 
 /** Cermin resolveCollisions di server, untuk prediksi lokal. `extra` = kotak dinamis (rumah pemain, Tahap 6). */
-export function resolveCollisions(pos: { x: number; z: number }, extra: ReadonlyArray<Box> = []): void {
+export function resolveCollisions(pos: { x: number; z: number; y?: number }, extra: ReadonlyArray<Box> = []): void {
   resolveAgainst(pos, COLLIDERS);
   if (extra.length > 0) resolveAgainst(pos, extra);
 }
@@ -127,7 +137,7 @@ export class Plaza {
     this.sun.position.set(28, 42, 18);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.left = -55;
+    this.sun.shadow.camera.left = -125;
     this.sun.shadow.camera.right = 145;
     this.sun.shadow.camera.top = 95;
     this.sun.shadow.camera.bottom = -95;
@@ -334,9 +344,6 @@ export class Plaza {
     bigRoof.rotation.y = Math.PI / 4;
     bigRoof.castShadow = true;
     balai.add(bigRoof);
-    const steps = new THREE.Mesh(new THREE.BoxGeometry(9, 0.5, 3), mat(0xd8cfc0));
-    steps.position.set(0, 0.25, 6);
-    balai.add(steps);
     const balaiSign = new THREE.Mesh(
       new THREE.PlaneGeometry(9, 2.1),
       new THREE.MeshBasicMaterial({ map: signTexture("BALAI KOTA", "#7a4a2b") })
@@ -344,6 +351,7 @@ export class Plaza {
     balaiSign.position.set(0, 4.6, 4.56);
     balai.add(balaiSign);
     this.group.add(balai);
+    this.buildDeck();
 
     // Tiang bendera merah-putih di depan balai kota (orisinal, tanpa logo).
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 9, 8), mat(0xd9d9d9));
@@ -363,10 +371,78 @@ export class Plaza {
       id: "balai",
       label: "Balai Kota Mini",
       description:
-        "Balai Kota Mini — pusat kegiatan komunitas KOTA KITA. Untuk sekarang pintunya masih terkunci: kawasan & fitur balai dibuka di tahap pengembangan berikutnya.",
+        "Balai Kota Mini — pusat kegiatan komunitas KOTA KITA. Naiki tangga besar di depannya ke Teras Atas: dek pandang setinggi 3 meter untuk berkumpul & berfoto bareng. WC umum GRATIS ada di area teras bawah (isi ulang lewat panel 💼).",
       position: new THREE.Vector3(0, 0, -27),
       radius: 6,
     });
+  }
+
+  /**
+   * Teras Atas Balai Kota (Tahap 9) — visual dek & tangga. Denah
+   * ketinggian + collider-nya HARUS sama dengan server
+   * (server/src/world/world.ts, cermin di client/src/world/Heights.ts):
+   * dek x -7..7, z -28.5..-23.5 setinggi 3 m; tangga lebar 4 m turun ke
+   * z -17.5; pagar di semua tepi dek kecuali bukaan tangga; 4 tiang
+   * penyangga di sudut-sudut dek.
+   */
+  private buildDeck() {
+    const stone = mat(0xd8cfc0);
+    const wood = mat(COLORS.wood);
+
+    // Pelat dek (atasnya tepat 3.0 m).
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(14, 0.35, 5), stone);
+    slab.position.set(0, 2.825, -26);
+    slab.castShadow = true;
+    slab.receiveShadow = true;
+    this.group.add(slab);
+
+    // Tangga besar: 10 anak tangga, masing-masing turun 0.3 m & maju 0.6 m.
+    for (let i = 0; i < 10; i++) {
+      const top = 3 - 0.3 * i;
+      const step = new THREE.Mesh(new THREE.BoxGeometry(4, top, 0.6), stone);
+      step.position.set(0, top / 2, -23.2 + 0.6 * i);
+      step.castShadow = true;
+      step.receiveShadow = true;
+      this.group.add(step);
+    }
+
+    // Tiang penyangga di empat sudut dek (collider tanah biasa di server).
+    const pillarGeo = new THREE.BoxGeometry(0.5, 2.65, 0.5);
+    for (const [px, pz] of [
+      [6.75, -28.25],
+      [-6.75, -28.25],
+      [6.75, -23.75],
+      [-6.75, -23.75],
+    ] as const) {
+      const pillar = new THREE.Mesh(pillarGeo, stone);
+      pillar.position.set(px, 1.325, pz);
+      pillar.castShadow = true;
+      this.group.add(pillar);
+    }
+
+    // Pagar dek: rel atas + tiang-tiang kecil (geometri & material dipakai ulang).
+    const railMat = wood;
+    const mkRail = (w: number, d: number, x: number, z: number) => {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 0.09, d), railMat);
+      rail.position.set(x, 3.95, z);
+      rail.castShadow = true;
+      this.group.add(rail);
+    };
+    mkRail(5, 0.09, -4.5, -23.7); // selatan kiri (bukaan tangga x -2..2)
+    mkRail(5, 0.09, 4.5, -23.7); // selatan kanan
+    mkRail(0.09, 5, 6.8, -26); // timur
+    mkRail(0.09, 5, -6.8, -26); // barat
+    const postGeo = new THREE.BoxGeometry(0.09, 0.95, 0.09);
+    const posts: Array<[number, number]> = [
+      [-6.8, -23.7], [-4.5, -23.7], [-2.1, -23.7],
+      [2.1, -23.7], [4.5, -23.7], [6.8, -23.7],
+      [6.8, -26], [6.8, -28.3], [-6.8, -26], [-6.8, -28.3],
+    ];
+    for (const [px, pz] of posts) {
+      const post = new THREE.Mesh(postGeo, railMat);
+      post.position.set(px, 3.48, pz);
+      this.group.add(post);
+    }
   }
 
   private tree(x: number, z: number, s = 1) {
@@ -426,9 +502,11 @@ export class Plaza {
     this.palm(21, 6);
 
     // Pagar tanaman di tepi dunia (timur kini di ujung Kampung Kita, x ±139).
+    // Sisi barat plaza (x -45) DIBUKA di tengah (z -4..4) sejak Tahap 9:
+    // jalan setapak menuju Pantai lewat celah itu.
     const hedgeMat = mat(0x4da657);
     const seg: Array<[number, number, number, number]> = [
-      [46, -45, 188, 1.2], [46, 45, 188, 1.2], [-45, 0, 1.2, 92], [139, 0, 1.2, 92],
+      [46, -45, 188, 1.2], [46, 45, 188, 1.2], [-45, -25, 1.2, 42], [-45, 25, 1.2, 42], [139, 0, 1.2, 92],
     ];
     for (const [x, z, w, d] of seg) {
       const h = new THREE.Mesh(new THREE.BoxGeometry(w, 1.1, d), hedgeMat);
