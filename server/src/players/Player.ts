@@ -19,7 +19,7 @@ export class Player extends Schema {
   /** pendek | panjang | hijab | peci | botak */
   @type("string") hair: string = "pendek";
   @type("string") hairColor: string = "#3a2a1c";
-  /** polos | batik */
+  /** polos | batik | merahputih | koko | pesta (tiga terakhir musiman, Tahap 9) */
   @type("string") shirtStyle: string = "polos";
   /** Nama pengguna akun pemilik avatar ("" untuk tamu) — identitas publik untuk fitur teman. */
   @type("string") account: string = "";
