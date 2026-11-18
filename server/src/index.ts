@@ -8,6 +8,7 @@ import { WebSocketTransport } from "@colyseus/ws-transport";
 import { KotaRoom } from "./rooms/KotaRoom";
 import { accounts, validUsername, validPassword, DEFAULT_PROFILE, type ProfileData } from "./accounts/store";
 import { city } from "./city/city";
+import { isSeasonalStyle, seasonalStyleActive, activeSeason } from "./economy/seasons";
 
 // Server KOTA KITA — Node.js + Colyseus + API akun (HTTP).
 // Port bisa diganti lewat variabel lingkungan PORT (default 2567).
@@ -20,6 +21,18 @@ app.use(express.json());
 // Endpoint cek kesehatan sederhana (dipakai untuk memastikan server hidup).
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "kota-kita-server", time: new Date().toISOString() });
+});
+
+// Musim kosmetik aktif (Tahap 9) — publik & baca-saja: layar mulai client
+// memakainya untuk menawarkan gaya baju musiman di editor avatar SEBELUM
+// pemain masuk room. Server tetap otoritasnya (state room juga memuatnya,
+// dan sanitasi profil menolak simpanan musiman di luar jendela).
+app.get("/season", (_req, res) => {
+  const season = activeSeason();
+  res.json({
+    ok: true,
+    season: season ? { style: season.style, label: `${season.icon} ${season.label}`, styleName: season.styleName } : null,
+  });
 });
 
 // Mode produksi (Tahap 4): server ini juga menyajikan website game,
@@ -50,7 +63,7 @@ function bearerToken(req: express.Request): string | undefined {
 }
 
 const HAIR_STYLES = ["pendek", "panjang", "hijab", "peci", "botak"];
-const SHIRT_STYLES = ["polos", "batik"];
+const SHIRT_STYLES = ["polos", "batik", "merahputih", "koko", "pesta"];
 function cleanColor(raw: unknown, fallback: string): string {
   return typeof raw === "string" && /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : fallback;
 }
@@ -59,6 +72,15 @@ function sanitizeProfile(raw: any, base: ProfileData): ProfileData {
     typeof raw?.name === "string"
       ? raw.name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 16) || base.name
       : base.name;
+  // Kosmetik musiman (Tahap 9): gaya musiman hanya boleh DISIMPAN BARU
+  // saat jendelanya aktif; di luar jendela, simpanan yang mencobanya
+  // jatuh ke "polos". Nilai yang tidak sah/tidak diisi mempertahankan
+  // gaya profil lama — jadi gaya musiman yang sudah terpasang tetap
+  // terpasang setelah musimnya berakhir.
+  let shirtStyle = base.shirtStyle;
+  if (typeof raw?.shirtStyle === "string" && SHIRT_STYLES.includes(raw.shirtStyle)) {
+    shirtStyle = isSeasonalStyle(raw.shirtStyle) && !seasonalStyleActive(raw.shirtStyle) ? "polos" : raw.shirtStyle;
+  }
   return {
     name,
     shirt: cleanColor(raw?.shirt, base.shirt),
@@ -66,7 +88,7 @@ function sanitizeProfile(raw: any, base: ProfileData): ProfileData {
     pants: cleanColor(raw?.pants, base.pants),
     hair: HAIR_STYLES.includes(raw?.hair) ? raw.hair : base.hair,
     hairColor: cleanColor(raw?.hairColor, base.hairColor),
-    shirtStyle: SHIRT_STYLES.includes(raw?.shirtStyle) ? raw.shirtStyle : base.shirtStyle,
+    shirtStyle,
   };
 }
 
