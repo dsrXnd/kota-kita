@@ -141,6 +141,58 @@ export interface LapakResult {
   message: string;
 }
 
+// ---------- Kota Hidup (Tahap 8) ----------
+// Statistik, Kabar Kota & status voting datang dari payload server lewat
+// pesan "city" (balasan city_get / vote_cast). Fasilitas aktif dibaca dari
+// state room. Client tidak menghitung apa pun sendiri.
+
+export interface CityNewsEntry {
+  ts: number;
+  icon: string;
+  text: string;
+}
+
+export interface CityVoteInfo {
+  facilityId: string;
+  name: string;
+  icon: string;
+  desc: string;
+  yes: number;
+  no: number;
+  closesAt: number;
+  /** Ambang minimal suara setuju agar lolos. */
+  minYes: number;
+  /** Pilihan sesi ini: "" (belum), "yes", atau "no". */
+  myVote: string;
+}
+
+export interface CityLastResult {
+  facilityId: string;
+  name: string;
+  icon: string;
+  passed: boolean;
+  yes: number;
+  no: number;
+}
+
+export interface CityPayload {
+  guest: boolean;
+  residents: number;
+  online: number;
+  houses: number;
+  lapaks: number;
+  kasKota: number;
+  news: CityNewsEntry[];
+  vote: CityVoteInfo | null;
+  lastResult: CityLastResult | null;
+  facilities: string[];
+}
+
+export interface VoteResult {
+  ok: boolean;
+  message: string;
+}
+
 /**
  * Alamat server multiplayer:
  *  1. ?server=ws://... di URL (paling fleksibel), atau
@@ -188,6 +240,10 @@ export class Network {
   onLapakResult: ((result: LapakResult) => void) | null = null;
   onLapakMine: ((mine: LapakMine) => void) | null = null;
   onLapakEvent: ((message: string) => void) | null = null;
+  onCity: ((payload: CityPayload) => void) | null = null;
+  onVoteResult: ((result: VoteResult) => void) | null = null;
+  onCityEvent: ((message: string) => void) | null = null;
+  onNewsUpdate: (() => void) | null = null;
 
   async connect(profile: Profile, token?: string | null): Promise<boolean> {
     try {
@@ -227,6 +283,12 @@ export class Network {
       this.room.onMessage("lapak_event", (data: { message: string }) => {
         if (typeof data?.message === "string") this.onLapakEvent?.(data.message);
       });
+      this.room.onMessage("city", (data: CityPayload) => this.onCity?.(data));
+      this.room.onMessage("vote_result", (data: VoteResult) => this.onVoteResult?.(data));
+      this.room.onMessage("city_event", (data: { message: string }) => {
+        if (typeof data?.message === "string") this.onCityEvent?.(data.message);
+      });
+      this.room.onMessage("news_update", () => this.onNewsUpdate?.());
       this.room.onLeave(() => {
         this.connected = false;
       });
@@ -286,6 +348,17 @@ export class Network {
   get worldIsNight(): boolean {
     if (!this.room) return false;
     return Boolean((this.room.state as any)?.isNight ?? false);
+  }
+
+  /** Id fasilitas kota yang sudah terbangun (dari state server, Tahap 8). */
+  get facilities(): string[] {
+    if (!this.room) return [];
+    const arr = (this.room.state as any)?.facilities;
+    if (!arr) return [];
+    const out: string[] = [];
+    const len = typeof arr.length === "number" ? arr.length : 0;
+    for (let i = 0; i < len; i++) out.push(String(arr[i]));
+    return out;
   }
 
   sendInput(x: number, z: number, sprint: boolean, jump: boolean) {
@@ -388,6 +461,15 @@ export class Network {
 
   requestMyLapak() {
     if (this.connected && this.room) this.room.send("lapak_mine_get", {});
+  }
+
+  // ---------- Kota Hidup (Tahap 8) ----------
+  requestCity() {
+    if (this.connected && this.room) this.room.send("city_get", {});
+  }
+
+  castVote(choice: "yes" | "no") {
+    if (this.connected && this.room) this.room.send("vote_cast", { choice });
   }
 
   disconnect() {
