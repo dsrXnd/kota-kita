@@ -27,7 +27,8 @@
     "test:plots": "node test/plots.mjs",
     "test:market": "node test/market.mjs",
     "test:load": "node test/load-50.mjs",
-    "test:city": "node test/city.mjs"
+    "test:city": "node test/city.mjs",
+    "test:9": "node test/tahap9.mjs"
   },
   "type": "commonjs",
   "version": "0.1.0"
