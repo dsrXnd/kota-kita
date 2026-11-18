@@ -13,6 +13,34 @@ export interface NearbyPlayer {
   isSelf: boolean;
 }
 
+// ---------- Perumahan (Tahap 6) ----------
+// Semua angka & status di tampilan kavling berasal dari state server;
+// HUD hanya menggambar pilihan yang diberikan main.ts.
+
+export interface PlotTierOption {
+  tier: number;
+  name: string;
+  /** Harga penuh (tanah kosong) atau selisih upgrade. */
+  cost: number;
+  isUpgrade: boolean;
+  current: boolean;
+  /** Rumah Tingkat di Kavling 1. */
+  locked: boolean;
+}
+
+export interface PlotView {
+  plotId: string;
+  title: string;
+  tierLabel: string;
+  price: number;
+  owner: string; // "" = kosong
+  houseName: string; // "" = belum ada rumah
+  isMine: boolean;
+  canClaim: boolean;
+  note: string; // penjelasan status (tamu / sudah punya / milik orang lain)
+  tiers: PlotTierOption[];
+}
+
 export interface HudCallbacks {
   onStart: (profile: Profile, auth: AuthIntent) => void;
   onLogout: () => void;
@@ -32,6 +60,9 @@ export interface HudCallbacks {
   onClaimBonus: () => void;
   onStartJob: (jobId: string) => void;
   onCancelJob: () => void;
+  onHome: () => void;
+  onClaimPlot: (plotId: string) => void;
+  onBuildHouse: (tier: number) => void;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -251,6 +282,12 @@ export class HUD {
     el<HTMLButtonElement>("btn-claim-bonus").addEventListener("click", () => this.cb.onClaimBonus());
     el<HTMLButtonElement>("btn-job-cancel").addEventListener("click", () => this.cb.onCancelJob());
 
+    // Perumahan (Tahap 6): tombol pulang + panel kavling.
+    el<HTMLButtonElement>("btn-home").addEventListener("click", () => this.cb.onHome());
+    el<HTMLButtonElement>("btn-plot-close").addEventListener("click", () => {
+      el("plot-panel").classList.add("hidden");
+    });
+
     // Chat.
     const panel = el("chat-panel");
     el<HTMLButtonElement>("btn-chat").addEventListener("click", () => {
@@ -440,6 +477,62 @@ export class HUD {
       row.appendChild(btn);
       listBox.appendChild(row);
     }
+  }
+
+  // ---------- Perumahan (Tahap 6) ----------
+  get plotPanelOpen(): boolean {
+    return !el("plot-panel").classList.contains("hidden");
+  }
+
+  /** Gambar panel kavling dari tampilan yang dihitung main.ts (data state server). */
+  showPlot(view: PlotView) {
+    el("plot-title").textContent = `🏠 ${view.title}`;
+    const lines = [
+      `${view.tierLabel} — harga klaim 🪙 ${view.price} KC`,
+      view.owner ? `Pemilik: @${view.owner}${view.isMine ? " (kamu)" : ""}` : "Status: masih kosong",
+      view.owner ? `Bangunan: ${view.houseName || "tanah kosong"}` : "",
+    ].filter(Boolean);
+    el("plot-info").textContent = lines.join("\n");
+
+    const box = el("plot-actions");
+    box.innerHTML = "";
+    if (view.note) {
+      const note = document.createElement("p");
+      note.className = "plot-note";
+      note.textContent = view.note;
+      box.appendChild(note);
+    }
+    if (view.canClaim) {
+      const btn = document.createElement("button");
+      btn.className = "plot-action-btn";
+      btn.textContent = `🪙 Klaim kavling ini — ${view.price} KC`;
+      btn.addEventListener("click", () => this.cb.onClaimPlot(view.plotId));
+      box.appendChild(btn);
+    }
+    if (view.isMine) {
+      for (const opt of view.tiers) {
+        const btn = document.createElement("button");
+        btn.className = "plot-action-btn";
+        if (opt.current) {
+          btn.textContent = `✅ ${opt.name} (sudah berdiri)`;
+          btn.disabled = true;
+        } else if (opt.locked) {
+          btn.textContent = `🔒 ${opt.name} — khusus Kavling 2`;
+          btn.disabled = true;
+        } else {
+          btn.textContent = opt.isUpgrade
+            ? `⬆️ Upgrade ke ${opt.name} — 🪙 ${opt.cost} KC (selisih)`
+            : `🔨 Bangun ${opt.name} — 🪙 ${opt.cost} KC`;
+          btn.addEventListener("click", () => this.cb.onBuildHouse(opt.tier));
+        }
+        box.appendChild(btn);
+      }
+    }
+    el("plot-panel").classList.remove("hidden");
+  }
+
+  hidePlot() {
+    el("plot-panel").classList.add("hidden");
   }
 
   // ---------- Umum ----------
