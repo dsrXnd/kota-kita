@@ -7,6 +7,7 @@ import { Server } from "colyseus";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { KotaRoom } from "./rooms/KotaRoom";
 import { accounts, validUsername, validPassword, DEFAULT_PROFILE, type ProfileData } from "./accounts/store";
+import { city } from "./city/city";
 
 // Server KOTA KITA — Node.js + Colyseus + API akun (HTTP).
 // Port bisa diganti lewat variabel lingkungan PORT (default 2567).
@@ -76,6 +77,8 @@ app.post("/auth/register", (req, res) => {
   if (!validPassword(password)) return res.status(400).json({ ok: false, error: "Kata sandi minimal 6 karakter." });
   const result = accounts.register(username, password);
   if (!result.ok) return res.status(409).json(result);
+  // Kabar Kota (Tahap 8): warga baru tercatat di umpan pengumuman server.
+  city.addNews("👋", `Warga baru bergabung: @${username}. Selamat datang di KOTA KITA!`);
   const login = accounts.login(username, password);
   return res.status(201).json({ ok: true, token: login.token, username, profile: accounts.getUser(username.toLowerCase())?.profile });
 });
