@@ -146,4 +146,44 @@ export class SoundEngine {
     osc.start(t0);
     osc.stop(t0 + 0.1);
   }
+
+  /** Nada sukses (Tahap 10): tiga nada naik yang ceria — kartu hasil sif berhasil. */
+  success() {
+    if (!this.ctx || !this.master || this.muted) return;
+    const ctx = this.ctx;
+    [523.25, 659.25, 783.99].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const t0 = ctx.currentTime + i * 0.09;
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, t0);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(0.11, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
+      osc.connect(gain);
+      gain.connect(this.master!);
+      osc.start(t0);
+      osc.stop(t0 + 0.24);
+    });
+  }
+
+  /** Nada gagal (Tahap 10): dua nada turun yang pelan — kartu hasil sif gagal. */
+  fail() {
+    if (!this.ctx || !this.master || this.muted) return;
+    const ctx = this.ctx;
+    [220, 155.56].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const t0 = ctx.currentTime + i * 0.16;
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(freq, t0);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(0.05, t0 + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.2);
+      osc.connect(gain);
+      gain.connect(this.master!);
+      osc.start(t0);
+      osc.stop(t0 + 0.22);
+    });
+  }
 }

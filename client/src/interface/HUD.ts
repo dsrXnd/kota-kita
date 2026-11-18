@@ -3,6 +3,8 @@ import type {
   FriendInfo,
   JobsPayload,
   JobUpdate,
+  JobDoneInfo,
+  JobFailedInfo,
   ShiftInfo,
   NeedsInfo,
   LapakSaleInfo,
@@ -106,6 +108,8 @@ export interface HudCallbacks {
   onStartJob: (jobId: string) => void;
   onCancelJob: (jobId: string) => void;
   onSkipJob: (jobId: string) => void;
+  /** Pilih / ganti 2 pekerjaan milik akun ini (Tahap 10) — server memvalidasi & membiayai. */
+  onChooseJobs: (jobIds: string[]) => void;
   onRefill: (action: string) => void;
   onHome: () => void;
   onClaimPlot: (plotId: string) => void;
@@ -178,6 +182,44 @@ function shiftProgressText(s: ShiftInfo): string {
   return "";
 }
 
+/** Siklus siang-malam server (cermin economy.ts): 24 menit asli = 16 siang + 8 malam. */
+const WORLD_DAY_MS_CLIENT = 24 * 60 * 1000;
+const WORLD_DAY_FRACTION_CLIENT = 16 / 24;
+
+/** Langkah tutorial masuk kota (Tahap 10) — satu ide per langkah, bahasa ramah. */
+const TUTORIAL_STEPS: ReadonlyArray<{ icon: string; title: string; text: string }> = [
+  {
+    icon: "🕹️",
+    title: "Cara Bergerak",
+    text: "Pakai joystick di kiri bawah untuk berjalan. Geser layar untuk memutar kamera, dan cubit layar untuk zoom. Tombol 🏃 untuk lari, ⬆️ untuk lompat!",
+  },
+  {
+    icon: "👆",
+    title: "Interaksi",
+    text: "Dekati tempat menarik — Warung Kopi, Papan Pengumuman, Balai Kota, kavling, lapak — lalu ketuk tombol ✋ Interaksi yang muncul di kanan bawah.",
+  },
+  {
+    icon: "💼",
+    title: "Pekerjaan & Koin Kota",
+    text: "Buka panel 💼 dan PILIH 2 pekerjaanmu — hanya dua itu yang bisa kamu ambil (ganti pilihan nanti bayar 500 KC, jadi pikir baik-baik!). Selama sif berjalan, ikuti PANAH di bawah layar menuju tujuanmu.",
+  },
+  {
+    icon: "🍔",
+    title: "Kebutuhan Hidup",
+    text: "Meter 🍗 lapar, 💧 haus, dan 🚽 kebelet berkurang selama kamu bermain. Selalu ada jalur GRATIS: minum di air mancur plaza, WC umum di Balai Kota, dan masak di rumahmu sendiri.",
+  },
+  {
+    icon: "💬",
+    title: "Ngobrol & Quest",
+    text: "Ketuk 💬 untuk chat dan 😄 untuk emote. Melambai (👋) ke warga lain yang kamu temui — menyapa 5 warga berbeda menyelesaikan quest Sapa Warga berhadiah KC!",
+  },
+  {
+    icon: "📸",
+    title: "Foto & Galeri",
+    text: "Ketuk 📸 untuk memotret kotamu. Foto tersimpan di galeri 🖼️ perangkat ini (bukan di server) dan bisa diunduh kapan saja. Selamat menjelajah KOTA KITA! 🏙️",
+  },
+];
+
 function formatCooldown(ms: number): string {
   const totalSec = Math.ceil(ms / 1000);
   const m = Math.floor(totalSec / 60);
@@ -191,6 +233,15 @@ export class HUD {
   private toastTimer = 0;
   private jobsTimer = 0;
   private cityTimer = 0;
+  /** Kapan payload jobs terakhir diterima — dasar hitung mundur cooldown LANGSUNG di panel (Tahap 10). */
+  private jobsAt = 0;
+  /** Mode memilih pekerjaan di panel (Tahap 10) + draf pilihan yang sedang disusun. */
+  private selectingJobs = false;
+  private draftChoice = new Set<string>();
+  private resultTimer = 0;
+  /** Sinkronisasi jam dunia terakhir dari server + jam terima — chip siang/malam berdetak lokal di antaranya (Tahap 10). */
+  private worldSync: { fraction: number; at: number } | null = null;
+  private tutIndex = 0;
   private lastCity: CityPayload | null = null;
   private lastJobs: JobsPayload | null = null;
   private lastQuests: QuestInfo[] = [];
@@ -337,6 +388,43 @@ export class HUD {
       window.clearInterval(this.jobsTimer);
     });
     el<HTMLButtonElement>("btn-claim-bonus").addEventListener("click", () => this.cb.onClaimBonus());
+
+    // Pilihan pekerjaan (Tahap 10): tombol ganti pilihan membuka mode
+    // memilih dengan pilihan sekarang tercentang dari awal.
+    el<HTMLButtonElement>("btn-change-jobs").addEventListener("click", () => {
+      this.selectingJobs = true;
+      this.draftChoice = new Set(this.lastJobs?.chosenJobs ?? []);
+      this.renderJobsPanel();
+    });
+
+    // Kartu hasil sif (Tahap 10): ketuk untuk menutup lebih cepat.
+    el("job-result-card").addEventListener("click", () => {
+      el("job-result-card").classList.add("hidden");
+      window.clearTimeout(this.resultTimer);
+    });
+
+    // Chip siang/malam (Tahap 10): berdetak tiap detik dari sinkronisasi
+    // jam server terakhir (main.ts menyegarkannya berkala).
+    window.setInterval(() => this.renderWorldChip(), 1000);
+
+    // Tutorial (Tahap 10): tombol ❓ membuka lagi kapan saja; tombol di
+    // dalam kartu menavigasi langkah & menandai selesai di perangkat ini.
+    el<HTMLButtonElement>("btn-help").addEventListener("click", () => this.showTutorial());
+    el<HTMLButtonElement>("btn-tut-skip").addEventListener("click", () => this.closeTutorial());
+    el<HTMLButtonElement>("btn-tut-prev").addEventListener("click", () => {
+      if (this.tutIndex > 0) {
+        this.tutIndex--;
+        this.renderTutStep();
+      }
+    });
+    el<HTMLButtonElement>("btn-tut-next").addEventListener("click", () => {
+      if (this.tutIndex >= TUTORIAL_STEPS.length - 1) {
+        this.closeTutorial();
+      } else {
+        this.tutIndex++;
+        this.renderTutStep();
+      }
+    });
 
     // Kebutuhan hidup (Tahap 6B): tombol isi ulang di panel — server yang
     // memvalidasi posisi & saldo; di sini hanya meneruskan aksinya.
@@ -512,10 +600,28 @@ export class HUD {
 
   renderJobs(payload: JobsPayload) {
     this.lastJobs = payload;
+    this.jobsAt = Date.now();
     this.activeShifts = payload.actives ?? [];
     this.lastQuests = payload.quests ?? [];
     if (payload.balance !== null) this.setBalance(payload.balance);
+    // Belum memilih 2 pekerjaan → panel langsung masuk mode memilih (Tahap 10).
+    if (payload.needsChoice && !payload.guest && !this.selectingJobs) {
+      this.selectingJobs = true;
+      this.draftChoice = new Set(payload.chosenJobs ?? []);
+    }
     this.renderJobsPanel();
+  }
+
+  /** Dipanggil main.ts saat server mengonfirmasi pilihan pekerjaan tersimpan. */
+  jobChoiceSaved() {
+    this.selectingJobs = false;
+    this.draftChoice.clear();
+  }
+
+  /** Sisa cooldown LANGSUNG satu pekerjaan: angka server dikurangi waktu sejak payload diterima. */
+  private cooldownLeft(job: JobsPayload["jobs"][number]): number {
+    if (job.cooldownRemainingMs <= 0) return 0;
+    return Math.max(0, job.cooldownRemainingMs - (Date.now() - this.jobsAt));
   }
 
   renderJobUpdate(update: JobUpdate) {
@@ -616,9 +722,132 @@ export class HUD {
       activeList.appendChild(row);
     }
 
-    listBox.innerHTML = "";
-    for (const job of data.jobs) {      const row = document.createElement("div");
-      row.className = "job-row";
+    // Tombol ganti pilihan (Tahap 10): hanya untuk warga berakun yang
+    // sudah punya pilihan & tidak sedang dalam mode memilih.
+    const changeBtn = el<HTMLButtonElement>("btn-change-jobs");
+    changeBtn.classList.toggle("hidden", data.guest || data.needsChoice || this.selectingJobs);
+    if (!data.guest && !data.needsChoice) {
+      changeBtn.textContent = `🔁 Ganti Pilihan Pekerjaan (${data.changeFee} KC)`;
+    }
+
+    if (this.selectingJobs && !data.guest) {
+      this.renderJobSelection(listBox, data);
+    } else {
+      listBox.innerHTML = "";
+      for (const job of data.jobs) {
+        const row = document.createElement("div");
+        row.className = "job-row";
+        const info = document.createElement("div");
+        info.className = "grow";
+        const title = document.createElement("div");
+        title.className = "job-title";
+        title.textContent = `${job.name} — 🪙 ${job.pay} KC`;
+        if (!data.guest) {
+          const tag = document.createElement("span");
+          const isChosen = (data.chosenJobs ?? []).includes(job.id);
+          tag.className = "job-tag " + (isChosen ? "mine" : "notmine");
+          tag.textContent = isChosen ? "📌 Pekerjaanmu" : "Bukan pilihanmu";
+          title.appendChild(tag);
+        }
+        const desc = document.createElement("div");
+        desc.className = "job-desc";
+        desc.textContent = job.desc;
+        // Status LANGSUNG per baris (Tahap 10): sedang sif / cooldown
+        // berdetak / siap / bukan pilihanmu.
+        const status = document.createElement("div");
+        status.className = "job-status";
+        const isActive = actives.some((s) => s.jobId === job.id);
+        const cdLeft = this.cooldownLeft(job);
+        const isChosen = (data.chosenJobs ?? []).includes(job.id);
+        if (data.guest) status.textContent = "🔒 Perlu akun untuk bekerja";
+        else if (isActive) status.textContent = "🟢 Sedang sif";
+        else if (!isChosen) status.textContent = "📌 Bukan pilihanmu — tidak bisa diambil";
+        else if (cdLeft > 0) status.textContent = `💤 Cooldown: ${formatCooldown(cdLeft)} lagi`;
+        else if (job.nightOnly && !data.isNight) status.textContent = "🌙 Siap — khusus malam server";
+        else status.textContent = "✅ Siap diambil";
+        info.append(title, desc, status);
+        row.appendChild(info);
+
+        const btn = document.createElement("button");
+        btn.className = "mini-btn";
+        if (data.guest) {
+          btn.textContent = "Perlu akun";
+          btn.disabled = true;
+          row.appendChild(btn);
+        } else if (isActive) {
+          btn.textContent = "Sedang sif";
+          btn.disabled = true;
+          row.appendChild(btn);
+        } else if (!isChosen) {
+          btn.textContent = "Bukan pilihanmu";
+          btn.disabled = true;
+          row.appendChild(btn);
+        } else if (cdLeft > 0) {
+          btn.textContent = `💤 ${formatCooldown(cdLeft)}`;
+          btn.disabled = true;
+          row.appendChild(btn);
+          // Skip berbayar: biaya TERBAKAR & hangus bila sif dibatalkan/gagal —
+          // peringatan WAJIB tampil sebelum pembayaran (aturan Tahap 6B).
+          if (data.skipAttemptsLeft > 0) {
+            const skipBtn = document.createElement("button");
+            skipBtn.className = "mini-btn skip-btn";
+            skipBtn.textContent = `⚡ Skip ${job.skipFee} KC (${data.skipAttemptsLeft}x)`;
+            skipBtn.addEventListener("click", () => {
+              const yakin = window.confirm(
+                `Skip cooldown "${job.name}" seharga ${job.skipFee} KC?\n\n` +
+                  `⚠️ Biaya ini TERBAKAR (hilang dari peredaran) dan HANGUS — tidak kembali walau sif sesudahnya kamu batalkan atau gagal (mis. antar kelewat waktu).\n` +
+                  `Jatah skip hari ini tersisa ${data.skipAttemptsLeft}x. Lanjut bayar?`
+              );
+              if (yakin) this.cb.onSkipJob(job.id);
+            });
+            row.appendChild(skipBtn);
+          }
+        } else if (job.nightOnly && !data.isNight) {
+          btn.textContent = "🌙 Khusus malam";
+          btn.disabled = true;
+          row.appendChild(btn);
+        } else if (actives.length >= 2) {
+          btn.textContent = "Sif penuh (2)";
+          btn.disabled = true;
+          row.appendChild(btn);
+        } else {
+          btn.textContent = "Mulai sif";
+          btn.addEventListener("click", () => this.cb.onStartJob(job.id));
+          row.appendChild(btn);
+        }
+        listBox.appendChild(row);
+      }
+    }
+
+    // Statistik pekerjaan per akun (Tahap 10).
+    this.renderJobStats(data);
+
+    // Quest sosial harian (Tahap 9) — di bawah daftar pekerjaan.
+    this.renderQuestList();
+  }
+
+  /**
+   * Mode memilih pekerjaan (Tahap 10): 6 baris bisa diketuk (maks. 2),
+   * tombol simpan aktif hanya saat tepat 2 terpilih. Pilihan pertama
+   * gratis; mengganti pilihan yang sudah ada menampilkan peringatan biaya.
+   */
+  private renderJobSelection(box: HTMLElement, data: JobsPayload) {
+    box.innerHTML = "";
+    const changing = (data.chosenJobs ?? []).length > 0;
+    const note = document.createElement("p");
+    note.className = "choice-note";
+    note.textContent = changing
+      ? `🔁 Ganti pilihan pekerjaanmu. Memilih himpunan yang BERBEDA dikenakan biaya ${data.changeFee} KC (terbakar). Pilihan yang sama persis ditolak tanpa biaya. Cooldown pekerjaanmu TIDAK ikut reset.`
+      : `👋 Selamat datang di KOTA KITA! Pilih 2 pekerjaan — hanya ini yang bisa kamu ambil. Ganti pilihan nanti bayar ${data.changeFee} KC, jadi pilih yang paling kamu suka. Pilihan pertama ini GRATIS.`;
+    box.appendChild(note);
+
+    for (const job of data.jobs) {
+      const picked = this.draftChoice.has(job.id);
+      const row = document.createElement("div");
+      row.className = "job-row choice-row" + (picked ? " picked" : "");
+      const check = document.createElement("span");
+      check.className = "choice-check";
+      check.textContent = picked ? "✅" : "⬜";
       const info = document.createElement("div");
       info.className = "grow";
       const title = document.createElement("div");
@@ -628,57 +857,97 @@ export class HUD {
       desc.className = "job-desc";
       desc.textContent = job.desc;
       info.append(title, desc);
-      row.appendChild(info);
-
-      const btn = document.createElement("button");
-      btn.className = "mini-btn";
-      const isActive = actives.some((s) => s.jobId === job.id);
-      if (data.guest) {
-        btn.textContent = "Perlu akun";
-        btn.disabled = true;
-        row.appendChild(btn);
-      } else if (isActive) {
-        btn.textContent = "Sedang sif";
-        btn.disabled = true;
-        row.appendChild(btn);
-      } else if (job.cooldownRemainingMs > 0) {
-        btn.textContent = `💤 ${formatCooldown(job.cooldownRemainingMs)}`;
-        btn.disabled = true;
-        row.appendChild(btn);
-        // Skip berbayar: biaya TERBAKAR & hangus bila sif dibatalkan/gagal —
-        // peringatan WAJIB tampil sebelum pembayaran (aturan Tahap 6B).
-        if (data.skipAttemptsLeft > 0) {
-          const skipBtn = document.createElement("button");
-          skipBtn.className = "mini-btn skip-btn";
-          skipBtn.textContent = `⚡ Skip ${job.skipFee} KC (${data.skipAttemptsLeft}x)`;
-          skipBtn.addEventListener("click", () => {
-            const yakin = window.confirm(
-              `Skip cooldown "${job.name}" seharga ${job.skipFee} KC?\n\n` +
-                `⚠️ Biaya ini TERBAKAR (hilang dari peredaran) dan HANGUS — tidak kembali walau sif sesudahnya kamu batalkan atau gagal (mis. antar kelewat waktu).\n` +
-                `Jatah skip hari ini tersisa ${data.skipAttemptsLeft}x. Lanjut bayar?`
-            );
-            if (yakin) this.cb.onSkipJob(job.id);
-          });
-          row.appendChild(skipBtn);
+      row.append(check, info);
+      row.addEventListener("click", () => {
+        if (this.draftChoice.has(job.id)) {
+          this.draftChoice.delete(job.id);
+        } else {
+          if (this.draftChoice.size >= 2) {
+            this.toast("Maksimal 2 pekerjaan ya — lepas salah satu dulu untuk mengganti.");
+            return;
+          }
+          this.draftChoice.add(job.id);
         }
-      } else if (job.nightOnly && !data.isNight) {
-        btn.textContent = "🌙 Khusus malam";
-        btn.disabled = true;
-        row.appendChild(btn);
-      } else if (actives.length >= 2) {
-        btn.textContent = "Sif penuh (2)";
-        btn.disabled = true;
-        row.appendChild(btn);
-      } else {
-        btn.textContent = "Mulai sif";
-        btn.addEventListener("click", () => this.cb.onStartJob(job.id));
-        row.appendChild(btn);
-      }
-      listBox.appendChild(row);
+        this.renderJobsPanel();
+      });
+      box.appendChild(row);
     }
 
-    // Quest sosial harian (Tahap 9) — di bawah daftar pekerjaan.
-    this.renderQuestList();
+    const actions = document.createElement("div");
+    actions.id = "jobs-choice-actions";
+    const save = document.createElement("button");
+    save.className = "plot-action-btn";
+    save.textContent =
+      this.draftChoice.size === 2
+        ? changing
+          ? `💾 Simpan Pilihan (${data.changeFee} KC)`
+          : "💾 Simpan Pilihan (Gratis)"
+        : `Pilih ${2 - this.draftChoice.size} pekerjaan lagi`;
+    save.disabled = this.draftChoice.size !== 2;
+    save.addEventListener("click", () => {
+      if (this.draftChoice.size !== 2) return;
+      if (changing) {
+        const yakin = window.confirm(
+          `Ganti pilihan pekerjaan? Biaya ${data.changeFee} KC TERBAKAR (hilang dari peredaran).\n\nSaldo kamu sekarang ${data.balance ?? 0} KC. Lanjut?`
+        );
+        if (!yakin) return;
+      }
+      this.cb.onChooseJobs([...this.draftChoice]);
+    });
+    actions.appendChild(save);
+    if (changing) {
+      const cancel = document.createElement("button");
+      cancel.className = "plot-action-btn";
+      cancel.textContent = "↩️ Batal";
+      cancel.addEventListener("click", () => {
+        this.selectingJobs = false;
+        this.draftChoice = new Set(data.chosenJobs ?? []);
+        this.renderJobsPanel();
+      });
+      actions.appendChild(cancel);
+    }
+    box.appendChild(actions);
+  }
+
+  /** Statistik pekerjaan per akun (Tahap 10) — angka dari payload server; dihitung sejak Tahap 10. */
+  private renderJobStats(data: JobsPayload) {
+    const box = document.getElementById("jobs-stats");
+    if (!box) return;
+    box.innerHTML = "";
+    if (data.guest) {
+      const p = document.createElement("p");
+      p.className = "quest-note";
+      p.textContent = "Statistik pekerjaan khusus warga yang masuk dengan akun.";
+      box.appendChild(p);
+      return;
+    }
+    let totalDone = 0;
+    let totalFailed = 0;
+    let totalEarned = 0;
+    for (const job of data.jobs) {
+      const st = data.jobStats?.[job.id] ?? { done: 0, failed: 0, earned: 0 };
+      totalDone += st.done;
+      totalFailed += st.failed;
+      totalEarned += st.earned;
+      const row = document.createElement("div");
+      row.className = "stat-row";
+      const name = document.createElement("span");
+      name.className = "grow";
+      name.textContent = job.name;
+      const vals = document.createElement("span");
+      vals.textContent = `✅ ×${st.done} · ❌ ×${st.failed} · 🪙 ${st.earned} KC`;
+      row.append(name, vals);
+      box.appendChild(row);
+    }
+    const total = document.createElement("div");
+    total.className = "stat-row total";
+    const tName = document.createElement("span");
+    tName.className = "grow";
+    tName.textContent = "Total semua pekerjaan";
+    const tVals = document.createElement("span");
+    tVals.textContent = `✅ ×${totalDone} · ❌ ×${totalFailed} · 🪙 ${totalEarned} KC`;
+    total.append(tName, tVals);
+    box.appendChild(total);
   }
 
   // ---------- Kebutuhan hidup & waktu dunia (Tahap 6B) ----------
@@ -713,6 +982,130 @@ export class HUD {
     btn.title = isNight
       ? "Malam server — Satpam Malam bisa diambil (waktu diatur server)"
       : "Siang server (waktu diatur server, sama untuk semua pemain)";
+  }
+
+  // ---------- Tahap 10: kartu hasil, chip siang/malam, panah, tutorial ----------
+
+  /** Kartu hasil sif: berhasil (+gaji & cooldown dimulai) atau gagal (alasan). Hilang sendiri ±6 detik / diketuk. */
+  showJobResult(ok: boolean, info: JobDoneInfo | JobFailedInfo) {
+    const card = el("job-result-card");
+    const title = el("job-result-title");
+    const body = el("job-result-body");
+    card.classList.remove("success", "fail");
+    card.classList.add(ok ? "success" : "fail");
+    if (ok) {
+      const done = info as JobDoneInfo;
+      title.textContent = `🎉 Sif Selesai: ${done.name}`;
+      const cdMin = Math.round(done.cooldownMs / 60000);
+      body.textContent = `+${done.pay} KC 💪\nCooldown dimulai: ${cdMin} mnt`;
+    } else {
+      const failed = info as JobFailedInfo;
+      title.textContent = `😞 Sif Gagal: ${failed.name}`;
+      body.textContent = `${failed.reason}\nTidak ada gaji — coba lagi kapan-kapan!`;
+    }
+    card.classList.remove("hidden");
+    window.clearTimeout(this.resultTimer);
+    this.resultTimer = window.setTimeout(() => card.classList.add("hidden"), 6000);
+  }
+
+  /** Terima sinkronisasi jam dunia dari server (dipanggil main.ts berkala). */
+  setWorldTime(fraction: number) {
+    this.worldSync = { fraction, at: Date.now() };
+    this.renderWorldChip();
+  }
+
+  /** Chip siang/malam + hitung mundur ke pergantian fase — diekstrapolasi lokal dari sinkronisasi terakhir. */
+  private renderWorldChip() {
+    const chip = document.getElementById("world-chip");
+    if (!chip || !this.worldSync) return;
+    const elapsed = (Date.now() - this.worldSync.at) / WORLD_DAY_MS_CLIENT;
+    const f = (((this.worldSync.fraction + elapsed) % 1) + 1) % 1;
+    const isDay = f < WORLD_DAY_FRACTION_CLIENT;
+    const remainMs = (isDay ? WORLD_DAY_FRACTION_CLIENT - f : 1 - f) * WORLD_DAY_MS_CLIENT;
+    const totalSec = Math.max(0, Math.ceil(remainMs / 1000));
+    const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+    const ss = String(totalSec % 60).padStart(2, "0");
+    chip.textContent = isDay ? `☀️ Siang · ${mm}:${ss}` : `🌙 Malam · ${mm}:${ss}`;
+    chip.title = isDay
+      ? `Siang server — malam tiba dalam ${mm}:${ss} (diatur server)`
+      : `Malam server — siang tiba dalam ${mm}:${ss} (diatur server)`;
+  }
+
+  /**
+   * Panah penunjuk tujuan sif (di bawah layar): mengarah ke tujuan sif
+   * aktif TERDEKAT, relatif terhadap arah pandang kamera. Dipanggil
+   * main.ts setiap frame dengan posisi pemain & yaw kamera.
+   */
+  updateNavArrow(px: number, pz: number, camYaw: number) {
+    const box = document.getElementById("nav-arrow");
+    if (!box) return;
+    let best: { s: ShiftInfo; d: number } | null = null;
+    for (const s of this.activeShifts) {
+      if (!s.objective) continue;
+      const d = Math.hypot(s.objective.x - px, s.objective.z - pz);
+      if (!best || d < best.d) best = { s, d };
+    }
+    if (!best) {
+      box.classList.add("hidden");
+      return;
+    }
+    const o = best.s.objective;
+    const dx = o.x - px;
+    const dz = o.z - pz;
+    const dist = Math.max(best.d, 0.001);
+    // Sumbu kamera di tanah: maju & kanan (cermin main.ts).
+    const fwdX = -Math.sin(camYaw);
+    const fwdZ = -Math.cos(camYaw);
+    const rightX = -fwdZ;
+    const rightZ = fwdX;
+    const fwdComp = (dx * fwdX + dz * fwdZ) / dist;
+    const rightComp = (dx * rightX + dz * rightZ) / dist;
+    const deg = (Math.atan2(rightComp, fwdComp) * 180) / Math.PI;
+    const glyph = document.getElementById("nav-arrow-glyph");
+    if (glyph) glyph.style.transform = `rotate(${deg.toFixed(1)}deg)`;
+    const label = document.getElementById("nav-arrow-label");
+    if (label) label.textContent = o.label;
+    const distEl = document.getElementById("nav-arrow-dist");
+    if (distEl) distEl.textContent = `${Math.round(best.d)} m`;
+    box.classList.remove("hidden");
+  }
+
+  /** Tampilkan tutorial dari langkah pertama (tombol ❓ / pertama masuk). */
+  showTutorial() {
+    this.tutIndex = 0;
+    this.renderTutStep();
+    el("tutorial-overlay").classList.remove("hidden");
+  }
+
+  /** Tutorial hanya muncul sendiri SEKALI per perangkat (bendera localStorage). */
+  maybeShowTutorial() {
+    let done = false;
+    try {
+      done = window.localStorage.getItem("kota-tutorial-done") === "1";
+    } catch {
+      done = false;
+    }
+    if (!done) this.showTutorial();
+  }
+
+  private closeTutorial() {
+    el("tutorial-overlay").classList.add("hidden");
+    try {
+      window.localStorage.setItem("kota-tutorial-done", "1");
+    } catch {
+      /* penyimpanan tidak tersedia — tutorial akan tampil lagi sesi berikutnya */
+    }
+  }
+
+  private renderTutStep() {
+    const step = TUTORIAL_STEPS[this.tutIndex];
+    el("tut-icon").textContent = step.icon;
+    el("tut-title").textContent = step.title;
+    el("tut-text").textContent = step.text;
+    el("tut-dots").textContent = TUTORIAL_STEPS.map((_, i) => (i === this.tutIndex ? "●" : "○")).join("");
+    el<HTMLButtonElement>("btn-tut-prev").disabled = this.tutIndex === 0;
+    el<HTMLButtonElement>("btn-tut-next").textContent =
+      this.tutIndex >= TUTORIAL_STEPS.length - 1 ? "Mulai Main! 🎉" : "Lanjut ➡️";
   }
 
   // ---------- Perumahan (Tahap 6) ----------
