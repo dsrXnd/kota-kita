@@ -1,4 +1,4 @@
-import type { Profile, FriendInfo } from "../multiplayer/Network";
+import type { Profile, FriendInfo, JobsPayload, JobUpdate, ShiftInfo } from "../multiplayer/Network";
 
 export interface AuthIntent {
   mode: "login" | "register" | "guest" | "account";
@@ -28,6 +28,10 @@ export interface HudCallbacks {
   onReportPlayer: (id: string, name: string) => void;
   onToggleBlock: (name: string) => void;
   onFriendsOpened: () => void;
+  onJobsOpened: () => void;
+  onClaimBonus: () => void;
+  onStartJob: (jobId: string) => void;
+  onCancelJob: () => void;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -73,10 +77,36 @@ function wireChips(containerId: string, initial: string): Selector {
   return { get: () => value, set: apply };
 }
 
+/** Teks kemajuan satu sif — murni tampilan dari ringkasan server. */
+function shiftProgressText(s: ShiftInfo): string {
+  if (s.kind === "stay") {
+    return `🧍 Berjaga di Warung Kopi: ${Math.floor(s.progressMs / 1000)}/${Math.round(s.needMs / 1000)} detik`;
+  }
+  if (s.kind === "visit") {
+    return `🧹 Titik bersih-bersih: ${s.visitedCount}/${s.totalPoints}`;
+  }
+  if (s.kind === "deliver") {
+    if (s.phase === "pickup") return "📦 Ambil paket di teras Balai Kota";
+    const left = Math.max(0, Math.ceil((s.deadline - Date.now()) / 1000));
+    return `📦 Antar ke ${s.targetName} — sisa ${left} detik`;
+  }
+  return "";
+}
+
+function formatCooldown(ms: number): string {
+  const totalSec = Math.ceil(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m > 0 ? `${m} mnt ${s} dtk` : `${s} dtk`;
+}
+
 /** Semua elemen layar: overlay mulai + akun, bar atas, chat, teman, tombol sentuh. */
 export class HUD {
   private cb: HudCallbacks;
   private toastTimer = 0;
+  private jobsTimer = 0;
+  private lastJobs: JobsPayload | null = null;
+  private activeShift: ShiftInfo | null = null;
   private authMode: "login" | "register" | "guest" = "login";
   private loggedInUser: string | null = null;
   private nameInput: HTMLInputElement;
@@ -201,6 +231,26 @@ export class HUD {
       this.cb.onAddFriend(username);
     });
 
+    // Panel pekerjaan & Koin Kota (Tahap 5).
+    const jobsPanel = el("jobs-panel");
+    el<HTMLButtonElement>("btn-jobs").addEventListener("click", () => {
+      const opening = jobsPanel.classList.contains("hidden");
+      jobsPanel.classList.toggle("hidden");
+      window.clearInterval(this.jobsTimer);
+      if (opening) {
+        this.cb.onJobsOpened();
+        // Segarkan tampilan tiap detik selama panel terbuka (hitung mundur
+        // cooldown & kurir) — datanya tetap dari payload server terakhir.
+        this.jobsTimer = window.setInterval(() => this.renderJobsPanel(), 1000);
+      }
+    });
+    el<HTMLButtonElement>("btn-jobs-close").addEventListener("click", () => {
+      jobsPanel.classList.add("hidden");
+      window.clearInterval(this.jobsTimer);
+    });
+    el<HTMLButtonElement>("btn-claim-bonus").addEventListener("click", () => this.cb.onClaimBonus());
+    el<HTMLButtonElement>("btn-job-cancel").addEventListener("click", () => this.cb.onCancelJob());
+
     // Chat.
     const panel = el("chat-panel");
     el<HTMLButtonElement>("btn-chat").addEventListener("click", () => {
@@ -309,6 +359,86 @@ export class HUD {
         row.appendChild(block);
       }
       box.appendChild(row);
+    }
+  }
+
+  // ---------- Ekonomi (Tahap 5) ----------
+  /** Chip saldo di bar atas. null = tamu/offline (tampil "—"). */
+  setBalance(balance: number | null) {
+    el("balance-chip").textContent = balance === null ? "🪙 — KC" : `🪙 ${balance} KC`;
+  }
+
+  renderJobs(payload: JobsPayload) {
+    this.lastJobs = payload;
+    this.activeShift = payload.active;
+    if (payload.balance !== null) this.setBalance(payload.balance);
+    this.renderJobsPanel();
+  }
+
+  renderJobUpdate(update: JobUpdate) {
+    this.activeShift = update.active;
+    if (this.lastJobs) this.lastJobs.active = update.active;
+    this.renderJobsPanel();
+  }
+
+  private renderJobsPanel() {
+    const data = this.lastJobs;
+    const balanceBox = el("jobs-balance");
+    const bonusBtn = el<HTMLButtonElement>("btn-claim-bonus");
+    const activeBox = el("jobs-active");
+    const listBox = el("jobs-list");
+    if (!data) {
+      balanceBox.textContent = "Memuat data pekerjaan…";
+      return;
+    }
+
+    balanceBox.textContent = data.guest
+      ? "Kamu masuk sebagai tamu. Daftar akun dulu untuk mengumpulkan Koin Kota (KC) & bekerja. 🪙"
+      : `Saldo kamu: 🪙 ${data.balance ?? 0} KC`;
+
+    const bonusVisible = !data.guest && data.bonusAvailable;
+    bonusBtn.classList.toggle("hidden", !bonusVisible);
+    if (bonusVisible) bonusBtn.textContent = `🎁 Klaim bonus harian +${data.bonusAmount} KC`;
+
+    const active = this.activeShift;
+    activeBox.classList.toggle("hidden", !active);
+    if (active) {
+      el("jobs-active-title").textContent = `Sedang sif: ${active.name} (+${active.pay} KC)`;
+      el("jobs-active-progress").textContent = shiftProgressText(active);
+    }
+
+    listBox.innerHTML = "";
+    for (const job of data.jobs) {
+      const row = document.createElement("div");
+      row.className = "job-row";
+      const info = document.createElement("div");
+      info.className = "grow";
+      const title = document.createElement("div");
+      title.className = "job-title";
+      title.textContent = `${job.name} — 🪙 ${job.pay} KC`;
+      const desc = document.createElement("div");
+      desc.className = "job-desc";
+      desc.textContent = job.desc;
+      info.append(title, desc);
+      row.appendChild(info);
+
+      const btn = document.createElement("button");
+      btn.className = "mini-btn";
+      if (data.guest) {
+        btn.textContent = "Perlu akun";
+        btn.disabled = true;
+      } else if (active) {
+        btn.textContent = active.jobId === job.id ? "Sedang sif" : "Sif lain aktif";
+        btn.disabled = true;
+      } else if (job.cooldownRemainingMs > 0) {
+        btn.textContent = `💤 ${formatCooldown(job.cooldownRemainingMs)}`;
+        btn.disabled = true;
+      } else {
+        btn.textContent = "Mulai sif";
+        btn.addEventListener("click", () => this.cb.onStartJob(job.id));
+      }
+      row.appendChild(btn);
+      listBox.appendChild(row);
     }
   }
 
