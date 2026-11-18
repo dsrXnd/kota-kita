@@ -159,10 +159,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  align-items: flex-start;
 }
 #conn-status,
 #player-count,
-#balance-chip {
+#balance-chip,
+#world-chip {
   background: rgba(16, 24, 34, 0.68);
   color: #fff;
   font-size: 13px;
@@ -170,13 +172,20 @@ body {
   padding: 6px 11px;
   border-radius: 999px;
   width: fit-content;
+  max-width: 46vw;
 }
 #balance-chip {
   background: rgba(122, 90, 20, 0.78);
 }
+#world-chip {
+  background: rgba(38, 70, 110, 0.78);
+}
 .top-right {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+  max-width: 52vw;
   pointer-events: auto;
 }
 .icon-btn {
@@ -187,6 +196,16 @@ body {
   background: rgba(16, 24, 34, 0.68);
   font-size: 22px;
   cursor: pointer;
+}
+@media (max-width: 480px) {
+  .icon-btn {
+    width: 42px;
+    height: 42px;
+    font-size: 19px;
+  }
+  .top-right {
+    gap: 6px;
+  }
 }
 
 /* ---------- Joystick ---------- */
@@ -560,13 +579,12 @@ body {
 }
 
 /* ---------- Kebutuhan hidup (Tahap 6B) ---------- */
+/* Strip kebutuhan di dalam tumpukan kiri atas (Tahap 10 — sebelumnya fixed
+   di top:58px dan BERTUMPUK dengan chip status; kini mengalir di bawahnya). */
 #needs-strip {
-  position: fixed;
-  top: calc(58px + env(safe-area-inset-top));
-  left: calc(10px + env(safe-area-inset-left));
-  z-index: 40;
   display: flex;
   gap: 10px;
+  width: fit-content;
   background: rgba(255, 253, 247, 0.88);
   border-radius: 999px;
   padding: 5px 12px;
@@ -1162,4 +1180,219 @@ body {
   font-weight: 600;
   max-width: 92vw;
   text-align: center;
+}
+
+/* ---------- Tahap 10: pilihan pekerjaan, statistik, panah, hasil, tutorial ---------- */
+#btn-change-jobs {
+  width: 100%;
+  margin: 2px 0 8px;
+  padding: 10px;
+  border: 2px dashed #b08934;
+  border-radius: 12px;
+  background: #fdf6df;
+  color: #7a5b00;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.job-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.job-tag.mine {
+  background: #dff3e4;
+  color: #1d6b34;
+}
+.job-tag.notmine {
+  background: #eceff2;
+  color: #7a8794;
+}
+.job-status {
+  font-size: 12px;
+  font-weight: 700;
+  color: #40618c;
+  margin-top: 2px;
+}
+.choice-note {
+  font-size: 13px;
+  color: #20303f;
+  background: #f4efe4;
+  border-radius: 10px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
+}
+.choice-row {
+  cursor: pointer;
+}
+.choice-row.picked {
+  outline: 2px solid #2e8c83;
+  background: #eefaf5;
+}
+.choice-check {
+  font-size: 20px;
+  width: 30px;
+  text-align: center;
+  flex-shrink: 0;
+}
+#jobs-choice-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+#jobs-choice-actions .plot-action-btn {
+  flex: 1;
+}
+#jobs-choice-actions .plot-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.stat-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px dashed #e5ddc9;
+  font-size: 13px;
+  color: #20303f;
+}
+.stat-row .grow {
+  flex: 1;
+}
+.stat-row.total {
+  border-bottom: none;
+  font-weight: 800;
+}
+#nav-arrow {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  max-width: 150px;
+  background: rgba(16, 24, 34, 0.78);
+  color: #fff;
+  border-radius: 16px;
+  padding: 7px 12px 8px;
+  pointer-events: none;
+  text-align: center;
+}
+#nav-arrow-glyph {
+  font-size: 22px;
+  line-height: 1;
+  color: #ffd94d;
+  display: inline-block;
+}
+#nav-arrow-label {
+  font-size: 11px;
+  font-weight: 700;
+}
+#nav-arrow-dist {
+  font-size: 11px;
+  color: #ffd94d;
+  font-weight: 800;
+}
+#job-result-card {
+  position: fixed;
+  top: calc(122px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 46;
+  width: min(330px, 90vw);
+  border-radius: 16px;
+  padding: 14px 16px;
+  text-align: center;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+#job-result-card.success {
+  background: #eefaf0;
+  border: 2px solid #57b25e;
+  color: #1d4d27;
+}
+#job-result-card.fail {
+  background: #fdf0f0;
+  border: 2px solid #d64545;
+  color: #6e1d1d;
+}
+#job-result-title {
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+#job-result-body {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: pre-line;
+}
+#tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(10, 16, 24, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 14px 14px calc(18px + env(safe-area-inset-bottom));
+}
+.tut-card {
+  background: #fffdf7;
+  border-radius: 20px;
+  padding: 20px 18px 16px;
+  width: min(430px, 94vw);
+  text-align: center;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+}
+#tut-icon {
+  font-size: 44px;
+  line-height: 1.1;
+}
+.tut-card h3 {
+  color: #20303f;
+  margin: 6px 0;
+}
+#tut-text {
+  color: #40536a;
+  font-size: 14px;
+  line-height: 1.45;
+}
+#tut-dots {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  letter-spacing: 4px;
+  color: #b08934;
+}
+.tut-btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.tut-btn {
+  flex: 1;
+  padding: 11px 6px;
+  border: none;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.tut-btn.primary {
+  background: #2e8c83;
+  color: #fff;
+}
+.tut-btn.ghost {
+  background: #eef1f4;
+  color: #40536a;
+}
+.tut-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

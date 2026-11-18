@@ -142,6 +142,13 @@ const EMOTE_DURATIONS: Record<string, number> = {
 let emoteName = "";
 let emoteUntilMs = 0;
 
+/** Mainkan emote di avatar sendiri + kirim ke server (satu-satunya jalur emote). */
+function playEmote(emote: string) {
+  emoteName = emote;
+  emoteUntilMs = performance.now() + (EMOTE_DURATIONS[emote] ?? 2000);
+  network.sendEmote(emote);
+}
+
 const sound = new SoundEngine();
 
 interface Remote {
@@ -194,9 +201,7 @@ const hud = new HUD({
     hud.toast(on ? "Mode lari: NYALA 🏃" : "Mode lari: mati 🚶");
   },
   onEmote: (emote) => {
-    emoteName = emote;
-    emoteUntilMs = performance.now() + (EMOTE_DURATIONS[emote] ?? 2000);
-    network.sendEmote(emote);
+    playEmote(emote);
     sound.click();
   },
   onToggleSound: (muted) => {
@@ -283,6 +288,9 @@ const hud = new HUD({
   onSkipJob: (jobId) => {
     network.skipJob(jobId);
   },
+  onChooseJobs: (jobIds) => {
+    network.chooseJobs(jobIds);
+  },
   onRefill: (action) => {
     if (!network.connected) {
       hud.toast("Sedang offline — isi ulang kebutuhan butuh koneksi ke server.");
@@ -360,12 +368,36 @@ network.onJobResult = (ok, message) => {
 network.onJobUpdate = (update) => {
   hud.renderJobUpdate(update);
   if (update.earned) {
-    hud.toast(update.message ?? `Sif selesai! +${update.earned} KC 🎉`, 4200);
-    sound.click();
+    // Pemberitahuan berhasil disampaikan kartu hasil (job_done, Tahap 10) —
+    // di sini cukup segarkan panel agar tidak dobel.
     network.requestJobs();
   } else if (update.message) {
     hud.toast(update.message, 3200);
   }
+};
+// Pilihan pekerjaan (Tahap 10): konfirmasi server menutup mode memilih.
+network.onJobChooseResult = (result) => {
+  hud.toast(result.message, 3800);
+  if (result.ok) {
+    sound.click();
+    hud.jobChoiceSaved();
+  }
+  network.requestJobs();
+};
+// Hasil sif (Tahap 10): kartu hasil + suara + reaksi avatar lewat jalur
+// emote biasa (pemain lain ikut melihat; jeda emote server 600 ms aman
+// karena ini peristiwa sekali-sekali).
+network.onJobDone = (info) => {
+  hud.showJobResult(true, info);
+  sound.success();
+  playEmote("clap");
+  network.requestJobs();
+};
+network.onJobFailed = (info) => {
+  hud.showJobResult(false, info);
+  sound.fail();
+  playEmote("sit");
+  network.requestJobs();
 };
 network.onSkipResult = (ok, message) => {
   hud.toast(message, 4200);
@@ -616,6 +648,8 @@ async function startGame(p: Profile, auth: AuthIntent) {
   const online = await network.connect(finalProfile, token);
   started = true;
   hud.hideOverlay();
+  // Tutorial masuk kota (Tahap 10): tampil sendiri sekali per perangkat.
+  hud.maybeShowTutorial();
   tpCam.snapBehind(selfPos);
   if (online) {
     hud.setStatus("Online — terhubung ke kota", true);
@@ -927,6 +961,8 @@ renderer.setAnimationLoop(() => {
     syncRemotes(dt);
     checkInteract(dt);
     tpCam.update(camera, selfPos, dt);
+    // Panah penunjuk tujuan sif (Tahap 10) — diperbarui setiap frame.
+    hud.updateNavArrow(selfPos.x, selfPos.z, tpCam.yaw);
     countTimer += dt;
     if (countTimer > 1) {
       countTimer = 0;
@@ -936,6 +972,8 @@ renderer.setAnimationLoop(() => {
       if (network.connected) {
         plaza.setNight(network.worldIsNight);
         hud.setWorldIndicator(network.worldIsNight);
+        // Chip siang/malam + hitung mundur fase (Tahap 10).
+        hud.setWorldTime(network.worldTime);
         // Tahap 9: banner event komunitas + tawaran gaya musiman di editor.
         hud.setEventBanner(network.activeEvent);
         const season = network.activeSeason;
