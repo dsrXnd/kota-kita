@@ -53,6 +53,8 @@ export interface EconomyData {
   jobLastDone: Record<string, number>;
   /** Meter kebutuhan hidup 0..100 (Tahap 6B) — hanya berkurang saat bermain. */
   needs: NeedsState;
+  /** Jumlah suvenir batik yang dibeli dari lapak pemain (Tahap 7) — koleksi persisten. */
+  souvenirs: number;
   /** Catatan mutasi sederhana (maks. 50 entri terakhir). */
   ledger: Array<{ ts: number; delta: number; reason: string; balanceAfter: number }>;
 }
@@ -66,6 +68,7 @@ export function defaultEconomy(): EconomyData {
     skipUsed: 0,
     jobLastDone: {},
     needs: fullNeeds(),
+    souvenirs: 0,
     ledger: [],
   };
 }
@@ -151,6 +154,7 @@ export class AccountStore {
       user.economy.skipUsed ??= 0;
       user.economy.jobLastDone ??= {};
       user.economy.needs ??= fullNeeds();
+      user.economy.souvenirs ??= 0;
       for (const k of ["hunger", "thirst", "toilet"] as const) {
         const v = user.economy.needs[k];
         user.economy.needs[k] = typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 100;
@@ -404,6 +408,31 @@ export class AccountStore {
     const balance = this.applyDelta(user, -amount, reason);
     this.save();
     return { ok: true, balance };
+  }
+
+  /**
+   * Kredit KC (Tahap 7: pemilik mengambil kas usaha lapaknya). Jalur resmi
+   * menambah saldo di luar gaji/check-in — jumlah harus positif & sah.
+   * Mengembalikan saldo baru.
+   */
+  creditKC(usernameLower: string, amount: number, reason: string): { ok: boolean; balance: number; error?: string } {
+    const user = this.db.users[usernameLower];
+    if (!user) return { ok: false, balance: 0, error: "Akun tidak ditemukan." };
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { ok: false, balance: user.economy.balance, error: "Jumlah tidak sah." };
+    }
+    const balance = this.applyDelta(user, amount, reason);
+    this.save();
+    return { ok: true, balance };
+  }
+
+  /** Tambah satu suvenir batik ke koleksi akun (Tahap 7). Mengembalikan jumlah koleksi kini. */
+  addSouvenir(usernameLower: string): number {
+    const user = this.db.users[usernameLower];
+    if (!user) return 0;
+    user.economy.souvenirs = (user.economy.souvenirs ?? 0) + 1;
+    this.save();
+    return user.economy.souvenirs;
   }
 
   appendChatLog(entry: unknown) {
