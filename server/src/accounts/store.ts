@@ -214,6 +214,11 @@ export class AccountStore {
     return this.db.users[usernameLower] ?? null;
   }
 
+  /** Jumlah total akun terdaftar (statistik "penduduk" Tahap 8). */
+  userCount(): number {
+    return Object.keys(this.db.users).length;
+  }
+
   saveProfile(usernameLower: string, profile: ProfileData) {
     const user = this.db.users[usernameLower];
     if (!user) return;
