@@ -8,6 +8,7 @@ import {
   HOUSE_NAME,
   HOUSE_PRICE,
 } from "./world/Kampung";
+import { Pasar, LAPAK_BY_ID, LAPAK_PRICE, LAPAK_CATALOG } from "./world/Pasar";
 import { Avatar } from "./avatar/Avatar";
 import { ThirdPersonCamera } from "./camera/ThirdPersonCamera";
 import { Joystick } from "./controls/Joystick";
@@ -21,7 +22,7 @@ import {
   savedUsername,
   clearSession,
 } from "./multiplayer/Account";
-import { HUD, type AuthIntent, type NearbyPlayer, type PlotView } from "./interface/HUD";
+import { HUD, type AuthIntent, type NearbyPlayer, type PlotView, type LapakView } from "./interface/HUD";
 import { SoundEngine } from "./interface/Sound";
 
 // Konstanta gerak — HARUS sama dengan server (server/src/rooms/KotaRoom.ts),
@@ -34,7 +35,7 @@ const JUMP_VELOCITY = 8.2;
 const BOUND_MIN_X = -42;
 const BOUND_MAX_X = 136;
 const BOUND_MIN_Z = -42;
-const BOUND_MAX_Z = 42;
+const BOUND_MAX_Z = 70;
 const FOUNTAIN_RADIUS = 3.6;
 
 // ---------- Renderer & scene ----------
@@ -53,7 +54,9 @@ const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerH
 const plaza = new Plaza(scene);
 const kampung = new Kampung();
 scene.add(kampung.group);
-const allInteractables: Interactable[] = [...plaza.interactables, ...kampung.interactables];
+const pasar = new Pasar();
+scene.add(pasar.group);
+const allInteractables: Interactable[] = [...plaza.interactables, ...kampung.interactables, ...pasar.interactables];
 const tpCam = new ThirdPersonCamera();
 
 // ---------- Kontrol ----------
@@ -144,6 +147,16 @@ let accountName: string | null = null;
 let currentInteract: Interactable | null = null;
 // Kavling yang panelnya sedang terbuka (Tahap 6).
 let openPlotId: string | null = null;
+// Lapak yang panelnya sedang terbuka + data privat lapakku dari server (Tahap 7).
+let openLapakId: string | null = null;
+let myLapakInfo: { lapakId: string; kas: number; sales: Array<{ buyer: string; item: string; price: number; ts: number }>; souvenirs: number } = {
+  lapakId: "",
+  kas: 0,
+  sales: [],
+  souvenirs: 0,
+};
+// Saldo terakhir dari server (untuk menonaktifkan tombol Beli saat kurang).
+let lastBalance: number | null = null;
 
 // ---------- HUD ----------
 const hud = new HUD({
@@ -177,6 +190,10 @@ const hud = new HUD({
     if (currentInteract.id.startsWith("plot:")) {
       openPlotId = currentInteract.id.slice("plot:".length);
       hud.showPlot(buildPlotView(openPlotId));
+    } else if (currentInteract.id.startsWith("lapak:")) {
+      openLapakId = currentInteract.id.slice("lapak:".length);
+      network.requestMyLapak(); // segarkan kas & log (bila lapakku) dari server
+      hud.showLapak(buildLapakView(openLapakId));
     } else {
       hud.showCard(currentInteract.label, currentInteract.description);
     }
@@ -264,6 +281,21 @@ const hud = new HUD({
   onBuildHouse: (tier) => {
     network.buildHouse(tier);
   },
+  onClaimLapak: (lapakId) => {
+    network.claimLapak(lapakId);
+  },
+  onBuyLapakItem: (lapakId, itemId) => {
+    network.buyLapakItem(lapakId, itemId);
+  },
+  onCollectKas: () => {
+    network.collectKas();
+  },
+  onSetLapakName: (name) => {
+    network.setLapakName(name);
+  },
+  onSetLapakItem: (itemId, price, stocked) => {
+    network.setLapakItem(itemId, price, stocked);
+  },
 });
 
 network.onChat = (msg) => {
@@ -280,8 +312,14 @@ network.onFriendsResult = (_ok, message) => hud.toast(message);
 network.onReportResult = () => hud.toast("Laporan terkirim ke server. Terima kasih sudah menjaga kota 🙏");
 
 // Ekonomi (Tahap 5): semua angka datang dari server; di sini hanya ditampilkan.
-network.onBalance = (balance) => hud.setBalance(balance);
-network.onJobs = (payload) => hud.renderJobs(payload);
+network.onBalance = (balance) => {
+  lastBalance = balance;
+  hud.setBalance(balance);
+};
+network.onJobs = (payload) => {
+  if (payload.balance !== null) lastBalance = payload.balance;
+  hud.renderJobs(payload);
+};
 network.onBonusResult = (ok, message) => {
   hud.toast(message, 3400);
   if (ok) sound.click();
@@ -357,6 +395,72 @@ network.onHomeResult = (result) => {
     sound.click();
   }
 };
+
+// Usaha Pemain (Tahap 7): hasil perintah lapak + data privat + kabar penjualan.
+network.onLapakResult = (result) => {
+  hud.toast(result.message, 3800);
+  if (result.ok) sound.click();
+  pasar.sync(network.lapaks as any);
+  network.requestMyLapak(); // kas/log bisa berubah (klaim, beli, ambil kas)
+  if (openLapakId && hud.lapakPanelOpen) hud.showLapak(buildLapakView(openLapakId));
+};
+network.onLapakMine = (mine) => {
+  myLapakInfo = mine;
+  if (openLapakId && hud.lapakPanelOpen) hud.showLapak(buildLapakView(openLapakId));
+};
+network.onLapakEvent = (message) => {
+  hud.toast(message, 4200);
+  sound.click();
+};
+
+/** Susun tampilan panel lapak dari state server + data privat (khusus pemilik). */
+function buildLapakView(lapakId: string): LapakView {
+  const def = LAPAK_BY_ID.get(lapakId);
+  const state = network.lapaks?.get(lapakId);
+  const owner = state?.owner ?? "";
+  const lapakName = state?.name ?? "";
+  const guest = !accountName;
+  const meLower = (accountName ?? "").toLowerCase();
+  const isMine = !!owner && owner.toLowerCase() === meLower;
+  let myLapakId: string | null = null;
+  network.lapaks?.forEach((l: any, id: string) => {
+    if (l?.owner && String(l.owner).toLowerCase() === meLower) myLapakId = id;
+  });
+  const canClaim = !owner && !guest && !myLapakId && network.connected;
+  let note = "";
+  if (!network.connected) note = "Sedang offline — klaim & belanja lapak butuh koneksi ke server.";
+  else if (!owner && guest) note = "Kamu masuk sebagai tamu. Daftar akun untuk mengumpulkan KC & klaim lapak (10.000 KC).";
+  else if (!owner && myLapakId) note = "Kamu sudah punya lapak — satu akun hanya boleh satu lapak.";
+  else if (!owner) note = `Lapak ini kosong. Klaim seharga 🪙 ${LAPAK_PRICE} KC dan mulai berjualan!`;
+  else if (isMine) note = "Ini lapakmu. Atur nama, harga & stok, lalu ambil kas usaha di sini saat ada penjualan.";
+  else if (guest) note = "Kamu masuk sebagai tamu — belanja butuh akun & saldo KC.";
+  const menu = state?.menu;
+  return {
+    lapakId,
+    title: `Lapak No. ${def?.number ?? "?"}`,
+    owner,
+    lapakName,
+    isMine,
+    canClaim,
+    balance: guest ? null : lastBalance,
+    note,
+    items: LAPAK_CATALOG.map((c) => {
+      const entry = menu?.get(c.id);
+      return {
+        id: c.id,
+        name: c.name,
+        effectText: c.effectText,
+        price: entry ? Number(entry.price) : c.defaultPrice,
+        minPrice: c.minPrice,
+        maxPrice: c.maxPrice,
+        stocked: entry ? Boolean(entry.stocked) : false,
+      };
+    }),
+    kas: isMine ? myLapakInfo.kas : 0,
+    sales: isMine ? myLapakInfo.sales : [],
+    souvenirs: myLapakInfo.souvenirs,
+  };
+}
 
 /** Susun tampilan panel kavling dari state server + denah lokal (harga memang konstanta bersama). */
 function buildPlotView(plotId: string): PlotView {
@@ -468,6 +572,8 @@ async function startGame(p: Profile, auth: AuthIntent) {
     // Ekonomi: ambil saldo & status pekerjaan dari server (tamu: chip "—").
     if (accountName) network.requestJobs();
     else hud.setBalance(null);
+    // Usaha Pemain (Tahap 7): ambil data lapakku (kas & log, privat) bila punya.
+    if (accountName) network.requestMyLapak();
     // Kebutuhan hidup & jam dunia dari server (Tahap 6B).
     network.requestNeeds();
     plaza.setNight(network.worldIsNight);
@@ -544,8 +650,8 @@ function stepLocalPhysics(dt: number) {
     selfPos.z *= push;
   }
 
-  // Tabrakan bangunan (sama seperti server) + rumah pemain yang berdiri (Tahap 6).
-  resolveCollisions(selfPos, kampung.houseColliders());
+  // Tabrakan bangunan (sama seperti server) + rumah pemain & meja lapak (Tahap 6 + 7).
+  resolveCollisions(selfPos, [...kampung.houseColliders(), ...pasar.stallColliders()]);
 
   // Suara langkah kaki mengikuti jarak tempuh di tanah.
   if (moving && selfPos.y <= 0) {
@@ -741,6 +847,16 @@ renderer.setAnimationLoop(() => {
         hud.setWorldIndicator(network.worldIsNight);
         kampung.sync(network.plots as any);
         if (openPlotId && hud.plotPanelOpen) hud.showPlot(buildPlotView(openPlotId));
+        // Pasar (Tahap 7): terapkan state lapak terbaru; segarkan panel —
+        // KECUALI pemilik sedang mengetik di panel (jangan ganggu inputnya).
+        pasar.sync(network.lapaks as any);
+        if (openLapakId && hud.lapakPanelOpen) {
+          const active = document.activeElement;
+          const typing =
+            active instanceof HTMLInputElement &&
+            document.getElementById("lapak-panel")?.contains(active);
+          if (!typing) hud.showLapak(buildLapakView(openLapakId));
+        }
       }
     }
   }
