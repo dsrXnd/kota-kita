@@ -49,9 +49,26 @@ import {
 import {
   FACILITY_BY_ID,
   MIN_YES,
+  currentCommunityEvent,
   facilityBoxes,
   city as cityStore,
+  type ActiveCommunityEvent,
 } from "../city/city";
+import {
+  BOUND_MAX_X,
+  BOUND_MAX_Z,
+  BOUND_MIN_X,
+  BOUND_MIN_Z,
+  STEP_UP,
+  WORLD_BOXES,
+  floorHeight,
+} from "../world/world";
+import {
+  GREET_RADIUS,
+  QUEST_ZONES,
+  type QuestProgressInfo,
+} from "../quests/quests";
+import { activeSeason, isSeasonalStyle, seasonalStyleActive } from "../economy/seasons";
 
 /** Keadaan publik satu kavling Kampung Kita (Tahap 6) — cukup untuk menggambar distrik yang sama di semua klien. */
 export class PlotState extends Schema {
@@ -90,6 +107,13 @@ export class KotaState extends Schema {
   @type("boolean") isNight: boolean = false;
   /** Id fasilitas kota yang sudah terbangun lewat voting (Tahap 8) — klien menggambar & menabraknya dari daftar ini. */
   @type(["string"]) facilities = new ArraySchema<string>();
+  /** Event komunitas yang sedang aktif (Tahap 9): tipe, nama tampilan & batas akhir (ms epoch); kosong/0 = tidak ada event. */
+  @type("string") eventType: string = "";
+  @type("string") eventName: string = "";
+  @type("number") eventEndsAt: number = 0;
+  /** Musim kosmetik aktif menurut server (Tahap 9): gaya baju & label musim; kosong = tidak ada musim. */
+  @type("string") seasonStyle: string = "";
+  @type("string") seasonLabel: string = "";
 }
 
 interface InputData {
@@ -134,7 +158,7 @@ interface ShiftState {
 }
 
 const HAIR_STYLES = ["pendek", "panjang", "hijab", "peci", "botak"];
-const SHIRT_STYLES = ["polos", "batik"];
+const SHIRT_STYLES = ["polos", "batik", "merahputih", "koko", "pesta"];
 
 /** Emote yang sah + durasinya (ms). "sit" batal otomatis saat pemain bergerak. */
 const EMOTES: Record<string, number> = {
@@ -150,12 +174,9 @@ export const WALK_SPEED = 4;
 export const RUN_SPEED = 7;
 export const GRAVITY = 22;
 export const JUMP_VELOCITY = 8.2;
-// Batas dunia: plaza lama ±42 m, Kampung Kita memanjang ke timur (Tahap 6),
-// Pasar memanjang ke selatan (Tahap 7). HARUS sama dengan batas di client (main.ts).
-const BOUND_MIN_X = -42;
-const BOUND_MAX_X = 136;
-const BOUND_MIN_Z = -42;
-const BOUND_MAX_Z = 70;
+// Batas dunia hidup di server/src/world/world.ts (Tahap 9) — plaza ±42 m,
+// Kampung Kita ke timur, Pasar ke selatan, Pantai ke barat. HARUS sama
+// dengan batas di client (main.ts).
 const FOUNTAIN_RADIUS = 3.6; // lingkaran tabrakan air mancur di (0,0)
 const CHAT_MAX = 120;
 const CHAT_MIN_INTERVAL_MS = 800;
@@ -215,15 +236,21 @@ export class KotaRoom extends Room<KotaState> {
   /** Kapan terakhir meter kebutuhan akun disimpan massal ke store. */
   private lastNeedsPersistAt = 0;
   /** Kotak tabrakan rumah yang sedang berdiri (Tahap 6) — diturunkan dari data kavling, dibangun ulang tiap ada perubahan. */
-  private houseBoxes: Array<readonly [number, number, number, number]> = [];
+  private houseBoxes: Array<ReadonlyArray<number>> = [];
   /** Kotak tabrakan meja lapak yang sudah dimiliki (Tahap 7) — diturunkan dari data pasar, dibangun ulang tiap ada perubahan. */
-  private stallBoxes: Array<readonly [number, number, number, number]> = [];
+  private stallBoxes: Array<ReadonlyArray<number>> = [];
   /** Kotak tabrakan fasilitas kota yang sudah terbangun (Tahap 8) — diturunkan dari daftar fasilitas aktif. */
-  private facilityBoxes: Array<readonly [number, number, number, number]> = [];
+  private facilityBoxes: Array<ReadonlyArray<number>> = [];
   /** Kapan terakhir penutupan voting dievaluasi (±1 detik sekali di loop simulasi). */
   private lastCityTickAt = 0;
-  /** Gabungan kotak dinamis (rumah + lapak + fasilitas) yang ditegakkan loop simulasi. */
-  private dynamicBoxes: Array<readonly [number, number, number, number]> = [];
+  /** Gabungan kotak dinamis (dunia Tahap 9 + rumah + lapak + fasilitas) yang ditegakkan loop simulasi. */
+  private dynamicBoxes: Array<ReadonlyArray<number>> = [...WORLD_BOXES];
+  /** Siklus event komunitas terakhir yang sudah diumumkan (Tahap 9). */
+  private eventCycleSeen = -1;
+  /** Event komunitas yang sedang aktif menurut tick terakhir (null = tidak ada). */
+  private activeEvent: ActiveCommunityEvent | null = null;
+  /** Kunci akun peserta unik event aktif (tamu tidak dihitung). */
+  private eventAttendees = new Set<string>();
 
   onCreate() {
     this.setState(new KotaState());
@@ -241,6 +268,19 @@ export class KotaRoom extends Room<KotaState> {
     cityStore.evaluateClosing();
     cityStore.ensureProposal();
     this.syncCityState();
+    // Tahap 9: musim kosmetik aktif + event komunitas yang sedang berjalan
+    // dimuat apa adanya (event yang sudah berjalan saat server menyala
+    // TIDAK diumumkan ulang; pengumuman hanya untuk aktivasi baru).
+    this.updateSeasonState();
+    const runningEvent = currentCommunityEvent();
+    if (runningEvent) {
+      this.activeEvent = runningEvent;
+      this.eventCycleSeen = runningEvent.cycleIndex;
+      this.state.eventType = runningEvent.def.type;
+      this.state.eventName = `${runningEvent.def.icon} ${runningEvent.def.name}`;
+      this.state.eventEndsAt = runningEvent.endsAt;
+    }
+    this.refreshDynamicBoxes();
 
     this.onMessage("input", (client, data: Partial<InputData>) => {
       // Server tidak memercayai klien: hanya arah yang diterima,
@@ -333,6 +373,8 @@ export class KotaRoom extends Room<KotaState> {
           name: data.emote,
           until: now + EMOTES[data.emote],
         });
+        // Quest Sapa Warga (Tahap 9): wave di dekat warga berakun lain.
+        if (data.emote === "wave") this.recordWaveQuest(client.sessionId);
       }
     });
 
@@ -346,6 +388,11 @@ export class KotaRoom extends Room<KotaState> {
 
     this.onMessage("jobs_get", (client) => {
       client.send("jobs", this.jobsPayload(client.sessionId));
+    });
+
+    this.onMessage("quests_get", (client) => {
+      const me = this.sessionAccount.get(client.sessionId);
+      client.send("quests", { guest: !me, quests: me ? accounts.questStatus(me) ?? [] : [] });
     });
 
     this.onMessage("bonus_claim", (client) => {
@@ -661,7 +708,7 @@ export class KotaRoom extends Room<KotaState> {
       const point = homePoint(def, rec.house);
       player.x = point.x;
       player.z = point.z;
-      player.y = 0;
+      player.y = floorHeight(point.x, point.z, 0);
       this.verticalVel.set(client.sessionId, 0);
       client.send("home_result", {
         ok: true,
@@ -876,7 +923,15 @@ export class KotaRoom extends Room<KotaState> {
     const hairPick = options?.hair ?? base?.hair;
     if (typeof hairPick === "string" && HAIR_STYLES.includes(hairPick)) player.hair = hairPick;
     const stylePick = options?.shirtStyle ?? base?.shirtStyle;
-    if (typeof stylePick === "string" && SHIRT_STYLES.includes(stylePick)) player.shirtStyle = stylePick;
+    if (typeof stylePick === "string" && SHIRT_STYLES.includes(stylePick)) {
+      // Gaya musiman (Tahap 9): diterima bila sedang musimnya ATAU memang
+      // sudah terpasang di profil akun (yang terpasang tetap terpasang
+      // setelah musim berakhir). Pilihan musiman BARU di luar musim ditolak
+      // diam-diam ke gaya profil/polos — server adalah otoritasnya.
+      if (!isSeasonalStyle(stylePick) || seasonalStyleActive(stylePick) || stylePick === base?.shirtStyle) {
+        player.shirtStyle = stylePick;
+      }
+    }
 
     if (accountKey) {
       this.sessionAccount.set(client.sessionId, accountKey);
@@ -965,7 +1020,7 @@ export class KotaRoom extends Room<KotaState> {
     }
     this.houseBoxes = boxes;
     this.state.housesBuilt = plotStore.houseCount();
-    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes, ...this.facilityBoxes];
+    this.refreshDynamicBoxes();
   }
 
   // ---------- Usaha Pemain (Tahap 7) ----------
@@ -1000,7 +1055,7 @@ export class KotaRoom extends Room<KotaState> {
     }
     this.stallBoxes = boxes;
     this.state.lapaksActive = marketStore.ownedCount();
-    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes, ...this.facilityBoxes];
+    this.refreshDynamicBoxes();
   }
 
   /**
@@ -1023,6 +1078,125 @@ export class KotaRoom extends Room<KotaState> {
     });
   }
 
+  // ---------- Tahap 9: dunia, event, quest & musim ----------
+
+  /** Bangun ulang gabungan collider dinamis: kotak dunia statis Tahap 9 selalu paling dasar. */
+  private refreshDynamicBoxes() {
+    this.dynamicBoxes = [...WORLD_BOXES, ...this.houseBoxes, ...this.stallBoxes, ...this.facilityBoxes];
+  }
+
+  /** Samakan state musim kosmetik dengan otoritas server (dipanggil saat room dibuat & tiap tick kota). */
+  private updateSeasonState() {
+    const season = activeSeason();
+    const style = season?.style ?? "";
+    const label = season ? `${season.icon} ${season.label}` : "";
+    if (this.state.seasonStyle !== style) this.state.seasonStyle = style;
+    if (this.state.seasonLabel !== label) this.state.seasonLabel = label;
+  }
+
+  /** Kirim pembaruan quest ke pemiliknya (kemajuan berubah atau hadiah baru dibayar). */
+  private sendQuestUpdate(
+    sessionId: string,
+    result: { reward: number; balance: number; quests: QuestProgressInfo[] },
+    questId: string
+  ) {
+    const info = result.quests.find((q) => q.id === questId);
+    if (!info) return;
+    const client = this.clients.find((c) => c.sessionId === sessionId);
+    if (!client) return;
+    const message =
+      result.reward > 0
+        ? `Quest harian selesai: ${info.icon} ${info.name} — +${result.reward} KC 🎉 Saldo sekarang ${result.balance} KC.`
+        : `${info.icon} Quest ${info.name}: ${info.progress}/${info.target}${questId === "jelajah" ? " kawasan" : questId === "sapa" ? " warga" : ""}.`;
+    client.send("quest_update", { quests: result.quests, reward: result.reward, balance: result.balance, message });
+    if (result.reward > 0) client.send("balance", { balance: result.balance });
+  }
+
+  /** Hook emote wave untuk quest Sapa Warga: target harus akun lain dalam radius 6 m. */
+  private recordWaveQuest(sessionId: string) {
+    const me = this.sessionAccount.get(sessionId);
+    const player = this.state.players.get(sessionId);
+    if (!me || !player) return;
+    const targets: string[] = [];
+    this.state.players.forEach((other, otherSessionId) => {
+      if (otherSessionId === sessionId) return;
+      const account = this.sessionAccount.get(otherSessionId);
+      if (!account || account === me) return;
+      if (Math.hypot(other.x - player.x, other.z - player.z) <= GREET_RADIUS) targets.push(account);
+    });
+    if (targets.length === 0) return;
+    const result = accounts.recordQuestGreets(me, targets);
+    if (result?.changed) this.sendQuestUpdate(sessionId, result, "sapa");
+  }
+
+  /** Cicipi posisi akun tiap tick kota untuk quest Jelajah Kota (zona pertama yang cocok). */
+  private sampleQuestZones() {
+    this.state.players.forEach((player, sessionId) => {
+      const me = this.sessionAccount.get(sessionId);
+      if (!me) return;
+      const zone = QUEST_ZONES.find((z) => Math.hypot(player.x - z.x, player.z - z.z) <= z.radius);
+      if (!zone) return;
+      const result = accounts.recordQuestZone(me, zone.id);
+      if (result?.changed) this.sendQuestUpdate(sessionId, result, "jelajah");
+    });
+  }
+
+  /**
+   * Siklus event komunitas: aktivasi baru diumumkan lewat Kabar Kota +
+   * toast; selama aktif, peserta unik BERAKUN di zona dicatat; saat
+   * jendela berakhir, Kabar Kota merangkum jumlah pesertanya. Tanpa KC.
+   */
+  private updateCommunityEvent(now: number) {
+    const current = currentCommunityEvent(now);
+    if (current) {
+      if (this.eventCycleSeen !== current.cycleIndex) {
+        this.eventCycleSeen = current.cycleIndex;
+        this.activeEvent = current;
+        this.eventAttendees = new Set<string>();
+        this.state.eventType = current.def.type;
+        this.state.eventName = `${current.def.icon} ${current.def.name}`;
+        this.state.eventEndsAt = current.endsAt;
+        cityStore.addNews(
+          current.def.icon,
+          `Event komunitas dimulai: ${current.def.icon} ${current.def.name} di Plaza Utama — kumpul di sekitar air mancur sekarang!`
+        );
+        this.broadcast("city_event", {
+          message: `${current.def.icon} Event dimulai: ${current.def.name} di Plaza Utama! Kumpul sekarang ya.`,
+        });
+        this.broadcast("news_update", {});
+      } else {
+        this.activeEvent = current;
+        if (this.state.eventType !== current.def.type) this.state.eventType = current.def.type;
+        const name = `${current.def.icon} ${current.def.name}`;
+        if (this.state.eventName !== name) this.state.eventName = name;
+        if (this.state.eventEndsAt !== current.endsAt) this.state.eventEndsAt = current.endsAt;
+      }
+      // Kehadiran dicicipi dari posisi otoritatif; hanya akun yang dihitung.
+      this.state.players.forEach((player, sessionId) => {
+        const account = this.sessionAccount.get(sessionId);
+        if (!account) return;
+        if (Math.hypot(player.x - current.def.x, player.z - current.def.z) <= current.def.radius) {
+          this.eventAttendees.add(account);
+        }
+      });
+      return;
+    }
+    if (this.activeEvent) {
+      const finished = this.activeEvent;
+      const count = this.eventAttendees.size;
+      cityStore.addNews(
+        finished.def.icon,
+        `Event ${finished.def.icon} ${finished.def.name} selesai — dihadiri ${count} warga. Terima kasih sudah meramaikan KOTA KITA!`
+      );
+      this.broadcast("news_update", {});
+      this.activeEvent = null;
+      this.eventAttendees = new Set<string>();
+    }
+    if (this.state.eventType !== "") this.state.eventType = "";
+    if (this.state.eventName !== "") this.state.eventName = "";
+    if (this.state.eventEndsAt !== 0) this.state.eventEndsAt = 0;
+  }
+
   // ---------- Kota Hidup (Tahap 8) ----------
 
   /**
@@ -1037,10 +1211,10 @@ export class KotaRoom extends Room<KotaState> {
     for (const id of built) {
       if (!current.has(id)) this.state.facilities.push(id);
     }
-    const boxes: Array<readonly [number, number, number, number]> = [];
+    const boxes: Array<ReadonlyArray<number>> = [];
     for (const id of built) boxes.push(...facilityBoxes(id));
     this.facilityBoxes = boxes;
-    this.dynamicBoxes = [...this.houseBoxes, ...this.stallBoxes, ...this.facilityBoxes];
+    this.refreshDynamicBoxes();
   }
 
   /** Payload panel kota untuk satu sesi: statistik, Kabar Kota, dan status voting (suara sesi ini ditandai). */
@@ -1089,13 +1263,17 @@ export class KotaRoom extends Room<KotaState> {
   }
 
   /**
-   * Evaluasi penutupan voting ±1 detik sekali dari loop simulasi: bila
+   * Tick kota ±1 detik sekali dari loop simulasi: musim & event Tahap 9,
+   * pencicipan zona quest, lalu evaluasi penutupan voting Tahap 8. Bila
    * ada usulan yang ditutup, sinkronkan fasilitas baru ke state dan
    * kabari semua pemain (toast peristiwa besar + segarkan panel kota).
    */
   private updateCity(now: number) {
     if (now - this.lastCityTickAt < 1000) return;
     this.lastCityTickAt = now;
+    this.updateSeasonState();
+    this.updateCommunityEvent(now);
+    this.sampleQuestZones();
     const closed = cityStore.evaluateClosing();
     if (!closed) return;
     this.syncCityState();
@@ -1176,6 +1354,7 @@ export class KotaRoom extends Room<KotaState> {
         cooldownRemainingMs: me ? accounts.jobCooldownRemaining(me, def.id) : 0,
       })),
       actives: this.shiftSnapshots(sessionId),
+      quests: me ? accounts.questStatus(me) ?? [] : [],
     };
   }
 
@@ -1202,6 +1381,13 @@ export class KotaRoom extends Room<KotaState> {
       message: `Sif "${def.name}" selesai! +${def.pay} KC 🎉`,
     });
     client.send("balance", { balance });
+    // Quest Kerja Keras (Tahap 9): sif selesai pertama hari ini membayar
+    // hadiah quest 5 KC lewat store (sekali sehari).
+    const quest = accounts.recordQuestJob(me);
+    if (quest?.changed) {
+      this.sendQuestUpdate(sessionId, quest, "kerja");
+      if (quest.reward > 0) client.send("balance", { balance: quest.balance });
+    }
   }
 
   /** Penilaian kemajuan SEMUA sif aktif satu pemain per tick simulasi, dari posisi otoritatifnya. */
@@ -1361,19 +1547,31 @@ export class KotaRoom extends Room<KotaState> {
         player.rotY = Math.atan2(input.x, input.z);
       }
 
-      // Lompat & gravitasi sederhana.
+      // Lantai bertingkat, lompat & gravitasi (Tahap 9). Lantai efektif
+      // dihitung dari posisi horizontal BARU dan tinggi kaki SEBELUMNYA:
+      // pemain yang menapak mengikuti lantai (naik/turun ramp), pemain
+      // yang melangkah keluar tepi lantai tinggi JATUH oleh gravitasi
+      // (tidak pernah melayang), dan pemain di tanah berjalan bebas DI
+      // BAWAH dek karena lantainya bukan lantai efektif bagi mereka.
       let vy = this.verticalVel.get(sessionId) ?? 0;
-      if (input.jump && player.y <= 0) {
+      const ground = floorHeight(player.x, player.z, player.y);
+      if (input.jump && player.y <= ground + 0.01) {
         vy = JUMP_VELOCITY;
         input.jump = false; // konsumsi agar tidak lompat terus
       }
-      if (player.y > 0 || vy !== 0) {
+      if (vy !== 0 || player.y - ground > STEP_UP) {
+        // Di udara: integrasikan gravitasi, mendarat di lantai efektif
+        // pada posisi & ketinggian terbaru.
         player.y += vy * dt;
         vy -= GRAVITY * dt;
-        if (player.y <= 0) {
-          player.y = 0;
+        const landing = floorHeight(player.x, player.z, player.y);
+        if (player.y <= landing) {
+          player.y = landing;
           vy = 0;
         }
+      } else {
+        // Menapak: kaki mengikuti lantai (termasuk turun ramp selangkah).
+        player.y = ground;
       }
       this.verticalVel.set(sessionId, vy);
 
@@ -1393,13 +1591,17 @@ export class KotaRoom extends Room<KotaState> {
       resolveCollisions(player, this.dynamicBoxes);
 
       // Animasi. Emote yang masih aktif menang, kecuali pemain sedang di udara.
+      // "Di udara" diukur RELATIF ke lantai setempat (Tahap 9) agar pemain
+      // di atas dek tetap bisa beremote & beranimasi normal.
+      const groundNow = floorHeight(player.x, player.z, player.y);
+      const airborne = player.y > groundNow + 0.05;
       const emote = this.emoteUntil.get(sessionId);
-      const emoteActive = emote && emote.until > now && player.y <= 0.05;
+      const emoteActive = emote && emote.until > now && !airborne;
       if (emoteActive && emote.name === "sit" && moving) {
         this.emoteUntil.delete(sessionId); // duduk batal saat bergerak
       }
       if (emoteActive && !(emote.name === "sit" && moving)) player.anim = emote.name;
-      else if (player.y > 0.05) player.anim = "jump";
+      else if (airborne) player.anim = "jump";
       else if (moving) player.anim = sprinting ? "run" : "walk";
       else player.anim = "idle";
 

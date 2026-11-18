@@ -3,8 +3,13 @@
  * HARUS sama dengan daftar di client (client/src/world/Plaza.ts: COLLIDERS).
  * Urutan: [minX, maxX, minZ, maxZ]. Sesuai denah docs/art-style.md:
  * ruko 10x8 m (yang di barat/timur berputar 90° jadi 8x10 m), balai kota 15x9 m.
+ *
+ * Tahap 9: kotak boleh punya 2 angka tambahan [minFeetY, maxFeetY] —
+ * kotak hanya berlaku bila tinggi kaki pemain (pos.y) berada di rentang
+ * [minFeetY, maxFeetY). Kotak 4 angka berlaku di semua ketinggian
+ * (perilaku lama, tidak berubah). Lihat server/src/world/world.ts.
  */
-export const COLLIDERS: ReadonlyArray<readonly [number, number, number, number]> = [
+export const COLLIDERS: ReadonlyArray<ReadonlyArray<number>> = [
   // Ruko utara (z = -31)
   [-29, -19, -35, -27],
   [-17, -7, -35, -27],
@@ -25,10 +30,19 @@ export const COLLIDERS: ReadonlyArray<readonly [number, number, number, number]>
 
 const PLAYER_RADIUS = 0.35;
 
-type Box = readonly [number, number, number, number];
+type Box = ReadonlyArray<number>;
 
-function resolveAgainst(pos: { x: number; z: number }, boxes: ReadonlyArray<Box>): void {
-  for (const [minX, maxX, minZ, maxZ] of boxes) {
+function resolveAgainst(pos: { x: number; z: number; y?: number }, boxes: ReadonlyArray<Box>): void {
+  const feetY = pos.y ?? 0;
+  for (const box of boxes) {
+    // Gerbang ketinggian kaki (Tahap 9): lewati kotak yang tidak berlaku
+    // pada ketinggian kaki pemain saat ini.
+    if (box.length > 4) {
+      const minFeetY = box[4];
+      const maxFeetY = box.length > 5 ? box[5] : Number.POSITIVE_INFINITY;
+      if (feetY < minFeetY || feetY >= maxFeetY) continue;
+    }
+    const [minX, maxX, minZ, maxZ] = box;
     const nearX = Math.max(minX - PLAYER_RADIUS, Math.min(pos.x, maxX + PLAYER_RADIUS));
     const nearZ = Math.max(minZ - PLAYER_RADIUS, Math.min(pos.z, maxZ + PLAYER_RADIUS));
     const dx = pos.x - nearX;
@@ -49,7 +63,7 @@ function resolveAgainst(pos: { x: number; z: number }, boxes: ReadonlyArray<Box>
 }
 
 /** Dorong posisi keluar dari semua kotak bangunan statis (sumbu penetrasi terkecil). */
-export function resolveCollisions(pos: { x: number; z: number }, extra: ReadonlyArray<Box> = []): void {
+export function resolveCollisions(pos: { x: number; z: number; y?: number }, extra: ReadonlyArray<Box> = []): void {
   resolveAgainst(pos, COLLIDERS);
   if (extra.length > 0) resolveAgainst(pos, extra);
 }
