@@ -23,6 +23,47 @@ export interface FriendInfo {
   lastOnline: number;
 }
 
+// ---------- Ekonomi (Tahap 5) ----------
+// Semua angka di bawah ini CUMA tampilan dari pesan server — client tidak
+// pernah menghitung saldo/kemajuan sendiri (server yang otoritatif).
+
+export interface JobInfo {
+  id: string;
+  name: string;
+  pay: number;
+  desc: string;
+  cooldownRemainingMs: number;
+}
+
+export interface ShiftInfo {
+  jobId: string;
+  name: string;
+  pay: number;
+  kind: string; // "stay" | "visit" | "deliver"
+  progressMs: number;
+  needMs: number;
+  visitedCount: number;
+  totalPoints: number;
+  phase: string; // kurir: "pickup" | "deliver"
+  targetName: string;
+  deadline: number;
+}
+
+export interface JobsPayload {
+  guest: boolean;
+  balance: number | null;
+  bonusAvailable: boolean;
+  bonusAmount: number;
+  jobs: JobInfo[];
+  active: ShiftInfo | null;
+}
+
+export interface JobUpdate {
+  active: ShiftInfo | null;
+  message?: string;
+  earned?: number;
+}
+
 /**
  * Alamat server multiplayer:
  *  1. ?server=ws://... di URL (paling fleksibel), atau
@@ -57,6 +98,11 @@ export class Network {
   onFriends: ((list: FriendInfo[]) => void) | null = null;
   onFriendsResult: ((ok: boolean, message: string) => void) | null = null;
   onReportResult: (() => void) | null = null;
+  onBalance: ((balance: number) => void) | null = null;
+  onBonusResult: ((ok: boolean, message: string) => void) | null = null;
+  onJobs: ((payload: JobsPayload) => void) | null = null;
+  onJobResult: ((ok: boolean, message: string) => void) | null = null;
+  onJobUpdate: ((update: JobUpdate) => void) | null = null;
 
   async connect(profile: Profile, token?: string | null): Promise<boolean> {
     try {
@@ -73,6 +119,17 @@ export class Network {
         this.onFriendsResult?.(data.ok, data.message)
       );
       this.room.onMessage("report_result", () => this.onReportResult?.());
+      this.room.onMessage("balance", (data: { balance: number }) => {
+        if (typeof data?.balance === "number") this.onBalance?.(data.balance);
+      });
+      this.room.onMessage("bonus_result", (data: { ok: boolean; message: string }) =>
+        this.onBonusResult?.(data.ok, data.message)
+      );
+      this.room.onMessage("jobs", (data: JobsPayload) => this.onJobs?.(data));
+      this.room.onMessage("job_result", (data: { ok: boolean; message: string }) =>
+        this.onJobResult?.(data.ok, data.message)
+      );
+      this.room.onMessage("job_update", (data: JobUpdate) => this.onJobUpdate?.(data));
       this.room.onLeave(() => {
         this.connected = false;
       });
@@ -126,6 +183,27 @@ export class Network {
 
   reportPlayer(targetId: string, reason: string) {
     if (this.connected && this.room) this.room.send("report", { targetId, reason });
+  }
+
+  // ---------- Ekonomi (Tahap 5) ----------
+  requestBalance() {
+    if (this.connected && this.room) this.room.send("balance_get", {});
+  }
+
+  requestJobs() {
+    if (this.connected && this.room) this.room.send("jobs_get", {});
+  }
+
+  claimBonus() {
+    if (this.connected && this.room) this.room.send("bonus_claim", {});
+  }
+
+  startJob(jobId: string) {
+    if (this.connected && this.room) this.room.send("job_start", { jobId });
+  }
+
+  cancelJob() {
+    if (this.connected && this.room) this.room.send("job_cancel", {});
   }
 
   disconnect() {
