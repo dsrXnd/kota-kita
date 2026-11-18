@@ -68,6 +68,29 @@ export interface JobsPayload {
   isNight: boolean;
   jobs: JobInfo[];
   actives: ShiftInfo[];
+  /** Quest sosial harian sesi ini (Tahap 9) — kosong untuk tamu. */
+  quests: QuestInfo[];
+}
+
+// ---------- Quest Sosial Harian (Tahap 9) ----------
+// Kemajuan & hadiah dihitung server; client hanya menampilkan.
+
+export interface QuestInfo {
+  id: string;
+  name: string;
+  icon: string;
+  desc: string;
+  reward: number;
+  progress: number;
+  target: number;
+  done: boolean;
+}
+
+export interface QuestUpdate {
+  quests: QuestInfo[];
+  reward?: number;
+  balance?: number;
+  message?: string;
 }
 
 export interface JobUpdate {
@@ -244,6 +267,7 @@ export class Network {
   onVoteResult: ((result: VoteResult) => void) | null = null;
   onCityEvent: ((message: string) => void) | null = null;
   onNewsUpdate: (() => void) | null = null;
+  onQuestUpdate: ((update: QuestUpdate) => void) | null = null;
 
   async connect(profile: Profile, token?: string | null): Promise<boolean> {
     try {
@@ -289,6 +313,10 @@ export class Network {
         if (typeof data?.message === "string") this.onCityEvent?.(data.message);
       });
       this.room.onMessage("news_update", () => this.onNewsUpdate?.());
+      this.room.onMessage("quest_update", (data: QuestUpdate) => this.onQuestUpdate?.(data));
+      this.room.onMessage("quests", (data: { quests: QuestInfo[] }) => {
+        if (Array.isArray(data?.quests)) this.onQuestUpdate?.({ quests: data.quests });
+      });
       this.room.onLeave(() => {
         this.connected = false;
       });
@@ -361,6 +389,24 @@ export class Network {
     return out;
   }
 
+  /** Event komunitas aktif dari state server (Tahap 9); null = tidak ada event. */
+  get activeEvent(): { type: string; name: string; endsAt: number } | null {
+    if (!this.room) return null;
+    const s = this.room.state as any;
+    const type = String(s?.eventType ?? "");
+    if (!type) return null;
+    return { type, name: String(s?.eventName ?? ""), endsAt: Number(s?.eventEndsAt ?? 0) };
+  }
+
+  /** Musim kosmetik aktif menurut server (Tahap 9); null = tidak ada musim. */
+  get activeSeason(): { style: string; label: string } | null {
+    if (!this.room) return null;
+    const s = this.room.state as any;
+    const style = String(s?.seasonStyle ?? "");
+    if (!style) return null;
+    return { style, label: String(s?.seasonLabel ?? "") };
+  }
+
   sendInput(x: number, z: number, sprint: boolean, jump: boolean) {
     if (this.connected && this.room) {
       this.room.send("input", { x, z, sprint, jump });
@@ -398,6 +444,10 @@ export class Network {
 
   requestJobs() {
     if (this.connected && this.room) this.room.send("jobs_get", {});
+  }
+
+  requestQuests() {
+    if (this.connected && this.room) this.room.send("quests_get", {});
   }
 
   claimBonus() {
