@@ -1,4 +1,4 @@
-import type { Profile, FriendInfo, JobsPayload, JobUpdate, ShiftInfo } from "../multiplayer/Network";
+import type { Profile, FriendInfo, JobsPayload, JobUpdate, ShiftInfo, NeedsInfo } from "../multiplayer/Network";
 
 export interface AuthIntent {
   mode: "login" | "register" | "guest" | "account";
@@ -49,7 +49,8 @@ export interface HudCallbacks {
   onEmote: (emote: string) => void;
   onInteract: () => void;
   onPhoto: () => void;
-  onDayNight: (night: boolean) => void;
+  /** Tombol jam dunia diklik — waktu diatur server, tombol ini hanya indikator + info. */
+  onDayNightInfo: () => void;
   onToggleSound: (muted: boolean) => void;
   onChat: (text: string) => void;
   onAddFriend: (username: string) => void;
@@ -59,7 +60,9 @@ export interface HudCallbacks {
   onJobsOpened: () => void;
   onClaimBonus: () => void;
   onStartJob: (jobId: string) => void;
-  onCancelJob: () => void;
+  onCancelJob: (jobId: string) => void;
+  onSkipJob: (jobId: string) => void;
+  onRefill: (action: string) => void;
   onHome: () => void;
   onClaimPlot: (plotId: string) => void;
   onBuildHouse: (tier: number) => void;
@@ -111,13 +114,13 @@ function wireChips(containerId: string, initial: string): Selector {
 /** Teks kemajuan satu sif — murni tampilan dari ringkasan server. */
 function shiftProgressText(s: ShiftInfo): string {
   if (s.kind === "stay") {
-    return `🧍 Berjaga di Warung Kopi: ${Math.floor(s.progressMs / 1000)}/${Math.round(s.needMs / 1000)} detik`;
+    return `🧍 ${s.name}: ${Math.floor(s.progressMs / 1000)}/${Math.round(s.needMs / 1000)} detik terakumulasi`;
   }
   if (s.kind === "visit") {
-    return `🧹 Titik bersih-bersih: ${s.visitedCount}/${s.totalPoints}`;
+    return `🎯 ${s.name}: ${s.visitedCount}/${s.totalPoints} titik`;
   }
   if (s.kind === "deliver") {
-    if (s.phase === "pickup") return "📦 Ambil paket di teras Balai Kota";
+    if (s.phase === "pickup") return `📦 Ambil di ${s.pickupName}`;
     const left = Math.max(0, Math.ceil((s.deadline - Date.now()) / 1000));
     return `📦 Antar ke ${s.targetName} — sisa ${left} detik`;
   }
@@ -137,7 +140,8 @@ export class HUD {
   private toastTimer = 0;
   private jobsTimer = 0;
   private lastJobs: JobsPayload | null = null;
-  private activeShift: ShiftInfo | null = null;
+  private activeShifts: ShiftInfo[] = [];
+  private lastNeeds: NeedsInfo | null = null;
   private authMode: "login" | "register" | "guest" = "login";
   private loggedInUser: string | null = null;
   private nameInput: HTMLInputElement;
@@ -235,13 +239,9 @@ export class HUD {
       soundBtn.textContent = muted ? "🔇" : "🔊";
       this.cb.onToggleSound(muted);
     });
-    const dnBtn = el<HTMLButtonElement>("btn-daynight");
-    dnBtn.addEventListener("click", () => {
-      const night = dnBtn.dataset.night !== "1";
-      dnBtn.dataset.night = night ? "1" : "0";
-      dnBtn.textContent = night ? "☀️" : "🌙";
-      this.cb.onDayNight(night);
-    });
+    // Tombol jam dunia (Tahap 6B): INDIKATOR waktu server, bukan toggle —
+    // siang/malam sama untuk semua pemain dan tidak bisa diatur sendiri.
+    el<HTMLButtonElement>("btn-daynight").addEventListener("click", () => this.cb.onDayNightInfo());
 
     // Panel teman & pemain.
     const friendsPanel = el("friends-panel");
@@ -280,7 +280,12 @@ export class HUD {
       window.clearInterval(this.jobsTimer);
     });
     el<HTMLButtonElement>("btn-claim-bonus").addEventListener("click", () => this.cb.onClaimBonus());
-    el<HTMLButtonElement>("btn-job-cancel").addEventListener("click", () => this.cb.onCancelJob());
+
+    // Kebutuhan hidup (Tahap 6B): tombol isi ulang di panel — server yang
+    // memvalidasi posisi & saldo; di sini hanya meneruskan aksinya.
+    document.querySelectorAll<HTMLButtonElement>("[data-refill]").forEach((btn) => {
+      btn.addEventListener("click", () => this.cb.onRefill(btn.dataset.refill ?? ""));
+    });
 
     // Perumahan (Tahap 6): tombol pulang + panel kavling.
     el<HTMLButtonElement>("btn-home").addEventListener("click", () => this.cb.onHome());
@@ -407,14 +412,14 @@ export class HUD {
 
   renderJobs(payload: JobsPayload) {
     this.lastJobs = payload;
-    this.activeShift = payload.active;
+    this.activeShifts = payload.actives ?? [];
     if (payload.balance !== null) this.setBalance(payload.balance);
     this.renderJobsPanel();
   }
 
   renderJobUpdate(update: JobUpdate) {
-    this.activeShift = update.active;
-    if (this.lastJobs) this.lastJobs.active = update.active;
+    this.activeShifts = update.actives ?? [];
+    if (this.lastJobs) this.lastJobs.actives = this.activeShifts;
     this.renderJobsPanel();
   }
 
@@ -423,6 +428,7 @@ export class HUD {
     const balanceBox = el("jobs-balance");
     const bonusBtn = el<HTMLButtonElement>("btn-claim-bonus");
     const activeBox = el("jobs-active");
+    const activeList = el("jobs-active-list");
     const listBox = el("jobs-list");
     if (!data) {
       balanceBox.textContent = "Memuat data pekerjaan…";
@@ -431,17 +437,36 @@ export class HUD {
 
     balanceBox.textContent = data.guest
       ? "Kamu masuk sebagai tamu. Daftar akun dulu untuk mengumpulkan Koin Kota (KC) & bekerja. 🪙"
-      : `Saldo kamu: 🪙 ${data.balance ?? 0} KC`;
+      : `Saldo kamu: 🪙 ${data.balance ?? 0} KC · 🔥 Streak check-in: ${data.streakCount} hari · ⚡ Sisa skip hari ini: ${data.skipAttemptsLeft}x · ${data.isNight ? "🌙 Sedang malam server" : "☀️ Sedang siang server"}`;
 
     const bonusVisible = !data.guest && data.bonusAvailable;
     bonusBtn.classList.toggle("hidden", !bonusVisible);
-    if (bonusVisible) bonusBtn.textContent = `🎁 Klaim bonus harian +${data.bonusAmount} KC`;
+    if (bonusVisible) {
+      bonusBtn.textContent = `🎁 Check-in Hari ke-${data.bonusStreakDay}: klaim +${data.bonusReward} KC`;
+    }
 
-    const active = this.activeShift;
-    activeBox.classList.toggle("hidden", !active);
-    if (active) {
-      el("jobs-active-title").textContent = `Sedang sif: ${active.name} (+${active.pay} KC)`;
-      el("jobs-active-progress").textContent = shiftProgressText(active);
+    // Sif aktif (maks. 2) — masing-masing dengan tombol batalnya sendiri.
+    const actives = this.activeShifts;
+    activeBox.classList.toggle("hidden", actives.length === 0);
+    activeList.innerHTML = "";
+    for (const s of actives) {
+      const row = document.createElement("div");
+      row.className = "active-row";
+      const info = document.createElement("div");
+      info.className = "grow";
+      const title = document.createElement("div");
+      title.className = "job-title";
+      title.textContent = `Sedang sif: ${s.name} (+${s.pay} KC)`;
+      const prog = document.createElement("div");
+      prog.className = "job-desc";
+      prog.textContent = shiftProgressText(s);
+      info.append(title, prog);
+      const cancel = document.createElement("button");
+      cancel.className = "mini-btn";
+      cancel.textContent = "Batalkan";
+      cancel.addEventListener("click", () => this.cb.onCancelJob(s.jobId));
+      row.append(info, cancel);
+      activeList.appendChild(row);
     }
 
     listBox.innerHTML = "";
@@ -461,22 +486,84 @@ export class HUD {
 
       const btn = document.createElement("button");
       btn.className = "mini-btn";
+      const isActive = actives.some((s) => s.jobId === job.id);
       if (data.guest) {
         btn.textContent = "Perlu akun";
         btn.disabled = true;
-      } else if (active) {
-        btn.textContent = active.jobId === job.id ? "Sedang sif" : "Sif lain aktif";
+        row.appendChild(btn);
+      } else if (isActive) {
+        btn.textContent = "Sedang sif";
         btn.disabled = true;
+        row.appendChild(btn);
       } else if (job.cooldownRemainingMs > 0) {
         btn.textContent = `💤 ${formatCooldown(job.cooldownRemainingMs)}`;
         btn.disabled = true;
+        row.appendChild(btn);
+        // Skip berbayar: biaya TERBAKAR & hangus bila sif dibatalkan/gagal —
+        // peringatan WAJIB tampil sebelum pembayaran (aturan Tahap 6B).
+        if (data.skipAttemptsLeft > 0) {
+          const skipBtn = document.createElement("button");
+          skipBtn.className = "mini-btn skip-btn";
+          skipBtn.textContent = `⚡ Skip ${job.skipFee} KC (${data.skipAttemptsLeft}x)`;
+          skipBtn.addEventListener("click", () => {
+            const yakin = window.confirm(
+              `Skip cooldown "${job.name}" seharga ${job.skipFee} KC?\n\n` +
+                `⚠️ Biaya ini TERBAKAR (hilang dari peredaran) dan HANGUS — tidak kembali walau sif sesudahnya kamu batalkan atau gagal (mis. antar kelewat waktu).\n` +
+                `Jatah skip hari ini tersisa ${data.skipAttemptsLeft}x. Lanjut bayar?`
+            );
+            if (yakin) this.cb.onSkipJob(job.id);
+          });
+          row.appendChild(skipBtn);
+        }
+      } else if (job.nightOnly && !data.isNight) {
+        btn.textContent = "🌙 Khusus malam";
+        btn.disabled = true;
+        row.appendChild(btn);
+      } else if (actives.length >= 2) {
+        btn.textContent = "Sif penuh (2)";
+        btn.disabled = true;
+        row.appendChild(btn);
       } else {
         btn.textContent = "Mulai sif";
         btn.addEventListener("click", () => this.cb.onStartJob(job.id));
+        row.appendChild(btn);
       }
-      row.appendChild(btn);
       listBox.appendChild(row);
     }
+  }
+
+  // ---------- Kebutuhan hidup & waktu dunia (Tahap 6B) ----------
+  /** Gambar meter kebutuhan (panel + strip ringkas) dari pesan server. */
+  renderNeeds(needs: NeedsInfo) {
+    this.lastNeeds = needs;
+    const paint = (fillId: string, valId: string, stripId: string, value: number) => {
+      const fill = document.getElementById(fillId);
+      if (fill) {
+        fill.style.width = `${Math.max(0, Math.min(100, value))}%`;
+        fill.classList.toggle("low", value <= needs.warnAt && value > 0);
+        fill.classList.toggle("crit", value <= 0);
+      }
+      const val = document.getElementById(valId);
+      if (val) val.textContent = String(Math.round(value));
+      const strip = document.getElementById(stripId);
+      if (strip) {
+        strip.style.width = `${Math.max(0, Math.min(100, value))}%`;
+        strip.classList.toggle("low", value <= needs.warnAt && value > 0);
+        strip.classList.toggle("crit", value <= 0);
+      }
+    };
+    paint("need-hunger-fill", "need-hunger-val", "ns-hunger-fill", needs.hunger);
+    paint("need-thirst-fill", "need-thirst-val", "ns-thirst-fill", needs.thirst);
+    paint("need-toilet-fill", "need-toilet-val", "ns-toilet-fill", needs.toilet);
+  }
+
+  /** Indikator jam dunia di bar atas: ikon mengikuti waktu server. */
+  setWorldIndicator(isNight: boolean) {
+    const btn = el<HTMLButtonElement>("btn-daynight");
+    btn.textContent = isNight ? "🌙" : "☀️";
+    btn.title = isNight
+      ? "Malam server — Satpam Malam bisa diambil (waktu diatur server)"
+      : "Siang server (waktu diatur server, sama untuk semua pemain)";
   }
 
   // ---------- Perumahan (Tahap 6) ----------
