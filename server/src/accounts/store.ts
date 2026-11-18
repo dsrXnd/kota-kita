@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { KC_START_BALANCE, KC_DAILY_BONUS, JOB_COOLDOWN_MS, jakartaDayKey } from "../economy/economy";
 
 /**
  * Penyimpanan akun KOTA KITA (Tahap 3).
@@ -27,6 +28,22 @@ export interface ProfileData {
   shirtStyle: string;
 }
 
+/** Data ekonomi satu akun (Tahap 5) — semua perubahan lewat metode store ini. */
+export interface EconomyData {
+  /** Saldo Koin Kota (KC). */
+  balance: number;
+  /** Hari terakhir bonus harian diklaim, kunci "YYYY-MM-DD" Asia/Jakarta ("" = belum pernah). */
+  lastBonusDay: string;
+  /** jobId -> waktu (ms) sif terakhir SELESAI — dasar cooldown, persisten agar tidak bisa diakali dengan relog. */
+  jobLastDone: Record<string, number>;
+  /** Catatan mutasi sederhana (maks. 50 entri terakhir). */
+  ledger: Array<{ ts: number; delta: number; reason: string; balanceAfter: number }>;
+}
+
+export function defaultEconomy(): EconomyData {
+  return { balance: KC_START_BALANCE, lastBonusDay: "", jobLastDone: {}, ledger: [] };
+}
+
 interface UserRecord {
   username: string; // bentuk tampilan (huruf besar/kecil seperti saat daftar)
   passHash: string; // "saltHex:hashHex"
@@ -34,6 +51,7 @@ interface UserRecord {
   lastOnline: number;
   profile: ProfileData;
   friends: string[]; // username (huruf kecil) akun teman
+  economy: EconomyData;
 }
 
 interface TokenRecord {
@@ -96,6 +114,15 @@ export class AccountStore {
         this.db = { users: {}, tokens: {} };
       }
     }
+    // Migrasi lembut: akun lama (sebelum Tahap 5) mendapat data ekonomi bawaan,
+    // akun yang sudah punya data ekonomi dilengkapi kolom yang mungkin kurang.
+    for (const user of Object.values(this.db.users)) {
+      if (!user.economy) user.economy = defaultEconomy();
+      if (typeof user.economy.balance !== "number") user.economy.balance = KC_START_BALANCE;
+      user.economy.lastBonusDay ??= "";
+      user.economy.jobLastDone ??= {};
+      user.economy.ledger ??= [];
+    }
   }
 
   private save() {
@@ -114,6 +141,7 @@ export class AccountStore {
       lastOnline: Date.now(),
       profile: { ...DEFAULT_PROFILE, name: username },
       friends: [],
+      economy: defaultEconomy(),
     };
     this.save();
     return { ok: true };
@@ -173,6 +201,60 @@ export class AccountStore {
     user.friends.push(friendKey);
     this.save();
     return { ok: true };
+  }
+
+  // ---------- Ekonomi (Tahap 5): Koin Kota ----------
+  // Satu-satunya jalan mengubah saldo. Semua pemanggil adalah kode server
+  // (room), tidak pernah client — client hanya menerima hasilnya.
+
+  getEconomy(usernameLower: string): EconomyData | null {
+    return this.db.users[usernameLower]?.economy ?? null;
+  }
+
+  /** Terapkan satu mutasi saldo + catat ke ledger. Mengembalikan saldo baru. */
+  private applyDelta(user: UserRecord, delta: number, reason: string): number {
+    user.economy.balance += delta;
+    user.economy.ledger.push({ ts: Date.now(), delta, reason, balanceAfter: user.economy.balance });
+    if (user.economy.ledger.length > 50) {
+      user.economy.ledger = user.economy.ledger.slice(-50);
+    }
+    return user.economy.balance;
+  }
+
+  /** Bonus masuk harian: sekali per hari kalender Asia/Jakarta. */
+  claimDailyBonus(usernameLower: string): { ok: boolean; balance: number; error?: string } {
+    const user = this.db.users[usernameLower];
+    if (!user) return { ok: false, balance: 0, error: "Akun tidak ditemukan." };
+    const today = jakartaDayKey(Date.now());
+    if (user.economy.lastBonusDay === today) {
+      return { ok: false, balance: user.economy.balance, error: "Bonus hari ini sudah diklaim. Kembali lagi besok ya!" };
+    }
+    user.economy.lastBonusDay = today;
+    const balance = this.applyDelta(user, KC_DAILY_BONUS, "Bonus masuk harian");
+    this.save();
+    return { ok: true, balance };
+  }
+
+  /** Sisa cooldown satu pekerjaan dalam ms (0 = boleh diambil). */
+  jobCooldownRemaining(usernameLower: string, jobId: string): number {
+    const user = this.db.users[usernameLower];
+    if (!user) return 0;
+    const last = user.economy.jobLastDone[jobId] ?? 0;
+    return Math.max(0, last + JOB_COOLDOWN_MS - Date.now());
+  }
+
+  /**
+   * Selesaikan satu sif: bayar gaji + catat waktu selesai (memulai cooldown).
+   * Dipanggil room HANYA setelah kemajuan terverifikasi dari posisi server.
+   * Mengembalikan saldo baru.
+   */
+  completeJob(usernameLower: string, jobId: string, pay: number, jobName: string): number {
+    const user = this.db.users[usernameLower];
+    if (!user) return 0;
+    user.economy.jobLastDone[jobId] = Date.now();
+    const balance = this.applyDelta(user, pay, `Gaji: ${jobName}`);
+    this.save();
+    return balance;
   }
 
   appendChatLog(entry: unknown) {
