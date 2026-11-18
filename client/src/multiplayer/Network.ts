@@ -23,7 +23,7 @@ export interface FriendInfo {
   lastOnline: number;
 }
 
-// ---------- Ekonomi (Tahap 5) ----------
+// ---------- Ekonomi (Tahap 5 + 6B) ----------
 // Semua angka di bawah ini CUMA tampilan dari pesan server — client tidak
 // pernah menghitung saldo/kemajuan sendiri (server yang otoritatif).
 
@@ -32,6 +32,9 @@ export interface JobInfo {
   name: string;
   pay: number;
   desc: string;
+  nightOnly: boolean;
+  skipFee: number;
+  cooldownMs: number;
   cooldownRemainingMs: number;
 }
 
@@ -44,7 +47,8 @@ export interface ShiftInfo {
   needMs: number;
   visitedCount: number;
   totalPoints: number;
-  phase: string; // kurir: "pickup" | "deliver"
+  phase: string; // deliver: "pickup" | "deliver"
+  pickupName: string;
   targetName: string;
   deadline: number;
 }
@@ -53,15 +57,37 @@ export interface JobsPayload {
   guest: boolean;
   balance: number | null;
   bonusAvailable: boolean;
-  bonusAmount: number;
+  /** Hadiah KC bila check-in diklaim sekarang (tangga streak Tahap 6B). */
+  bonusReward: number;
+  /** Hari siklus streak (1..7) untuk klaim berikutnya. */
+  bonusStreakDay: number;
+  /** Total hari beruntun saat ini. */
+  streakCount: number;
+  /** Sisa jatah skip cooldown berbayar hari ini. */
+  skipAttemptsLeft: number;
+  isNight: boolean;
   jobs: JobInfo[];
-  active: ShiftInfo | null;
+  actives: ShiftInfo[];
 }
 
 export interface JobUpdate {
-  active: ShiftInfo | null;
+  actives: ShiftInfo[];
   message?: string;
   earned?: number;
+}
+
+// ---------- Kebutuhan hidup (Tahap 6B) ----------
+
+export interface NeedsInfo {
+  hunger: number;
+  thirst: number;
+  toilet: number;
+  warnAt: number;
+}
+
+export interface NeedsResult {
+  ok: boolean;
+  message: string;
 }
 
 // ---------- Perumahan (Tahap 6) ----------
@@ -117,6 +143,9 @@ export class Network {
   onJobs: ((payload: JobsPayload) => void) | null = null;
   onJobResult: ((ok: boolean, message: string) => void) | null = null;
   onJobUpdate: ((update: JobUpdate) => void) | null = null;
+  onSkipResult: ((ok: boolean, message: string) => void) | null = null;
+  onNeeds: ((needs: NeedsInfo) => void) | null = null;
+  onNeedsResult: ((result: NeedsResult) => void) | null = null;
   onPlotResult: ((result: PlotResult) => void) | null = null;
   onHomeResult: ((result: PlotResult) => void) | null = null;
 
@@ -146,6 +175,11 @@ export class Network {
         this.onJobResult?.(data.ok, data.message)
       );
       this.room.onMessage("job_update", (data: JobUpdate) => this.onJobUpdate?.(data));
+      this.room.onMessage("job_skip_result", (data: { ok: boolean; message: string }) =>
+        this.onSkipResult?.(data.ok, data.message)
+      );
+      this.room.onMessage("needs", (data: NeedsInfo) => this.onNeeds?.(data));
+      this.room.onMessage("needs_result", (data: NeedsResult) => this.onNeedsResult?.(data));
       this.room.onMessage("plot_result", (data: PlotResult) => this.onPlotResult?.(data));
       this.room.onMessage("home_result", (data: PlotResult) => this.onHomeResult?.(data));
       this.room.onLeave(() => {
@@ -183,6 +217,18 @@ export class Network {
   get housesBuilt(): number {
     if (!this.room) return 0;
     return Number((this.room.state as any)?.housesBuilt ?? 0);
+  }
+
+  /** Fraksi hari dunia 0..1 dari jam server (Tahap 6B) — sama untuk semua pemain. */
+  get worldTime(): number {
+    if (!this.room) return 0;
+    return Number((this.room.state as any)?.worldTime ?? 0);
+  }
+
+  /** Apakah dunia sedang malam menurut jam server. */
+  get worldIsNight(): boolean {
+    if (!this.room) return false;
+    return Boolean((this.room.state as any)?.isNight ?? false);
   }
 
   sendInput(x: number, z: number, sprint: boolean, jump: boolean) {
@@ -232,8 +278,21 @@ export class Network {
     if (this.connected && this.room) this.room.send("job_start", { jobId });
   }
 
-  cancelJob() {
-    if (this.connected && this.room) this.room.send("job_cancel", {});
+  cancelJob(jobId?: string) {
+    if (this.connected && this.room) this.room.send("job_cancel", jobId ? { jobId } : {});
+  }
+
+  skipJob(jobId: string) {
+    if (this.connected && this.room) this.room.send("job_skip", { jobId });
+  }
+
+  // ---------- Kebutuhan hidup (Tahap 6B) ----------
+  requestNeeds() {
+    if (this.connected && this.room) this.room.send("needs_get", {});
+  }
+
+  refillNeed(action: string) {
+    if (this.connected && this.room) this.room.send("need_refill", { action });
   }
 
   // ---------- Perumahan (Tahap 6) ----------
