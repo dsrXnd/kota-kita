@@ -68,17 +68,17 @@ Prinsip: setiap tahap harus **bisa dijalankan & diuji** sebelum tahap berikutnya
 
 *Spek harga & keuntungan DIKUNCI user 18 Nov 2026 (dihitung terhadap ekonomi Tahap 5: saldo awal 500 KC, bonus harian 100 KC, gaji pekerjaan 150–250 KC).*
 
-- [ ] Kawasan permukiman baru **Kampung Kita** menempel pada peta plaza: **24 kavling** bergrid dengan papan nomor — **16 Kavling 1** (barisan dalam) + **8 Kavling 2** (pinggir jalan utama dekat gerbang plaza, petak lebih luas)
-- [ ] Akun bisa **klaim 1 kavling** memakai KC; kepemilikan tersimpan persisten di server dan terlihat semua pemain (nama pemilik di papan rumah); klaim atas petak yang sudah dimiliki ditolak server
-- [ ] **Harga kavling (keputusan user):** Kavling 1 = **2.500 KC** (cukup untuk Rumah Bambu & Batu) · Kavling 2 = **5.000 KC** (lokasi strategis paling sering dilewati pemain; satu-satunya yang boleh dibangun Rumah Tingkat; muat halaman/taman depan)
-- [ ] Katalog rumah orisinal 3 tingkat — dibangun seketika dari primitif bergaya art-style kita, lengkap dengan collider; upgrade cukup membayar selisih harga:
+- [x] Kawasan permukiman baru **Kampung Kita** menempel pada peta plaza: **24 kavling** bergrid dengan papan nomor — **16 Kavling 1** (barisan dalam) + **8 Kavling 2** (pinggir jalan utama dekat gerbang plaza, petak lebih luas)
+- [x] Akun bisa **klaim 1 kavling** memakai KC; kepemilikan tersimpan persisten di server dan terlihat semua pemain (nama pemilik di papan rumah); klaim atas petak yang sudah dimiliki ditolak server
+- [x] **Harga kavling (keputusan user):** Kavling 1 = **2.500 KC** (cukup untuk Rumah Bambu & Batu) · Kavling 2 = **5.000 KC** (lokasi strategis paling sering dilewati pemain; satu-satunya yang boleh dibangun Rumah Tingkat; muat halaman/taman depan)
+- [x] Katalog rumah orisinal 3 tingkat — dibangun seketika dari primitif bergaya art-style kita, lengkap dengan collider; upgrade cukup membayar selisih harga:
   - **Rumah Bambu — 2.000 KC**: rumah pertama; mengaktifkan tombol "Ke Rumahku", titik istirahat/respawn pribadi
   - **Rumah Batu — 5.000 KC**: permanen & lebih lega, kapasitas tamu lebih banyak, bisa memasang taman kecil
   - **Rumah Tingkat — 7.500 KC** (khusus Kavling 2): 2 lantai + balkon, kapasitas tamu terbanyak, trofi prestise warga; kandidat fitur sewa kamar di tahap lanjutan (belum dijanjikan)
-- [ ] Tombol **"Ke Rumahku"** (teleport pulang) + pemain lain bisa berkunjung & melihat rumah dari luar
-- [ ] Statistik awal: jumlah rumah berdiri terhitung di server (dipakai Tahap 8)
+- [x] Tombol **"Ke Rumahku"** (teleport pulang) + pemain lain bisa berkunjung & melihat rumah dari luar
+- [x] Statistik awal: jumlah rumah berdiri terhitung di server (dipakai Tahap 8)
 
-**Selesai bila:** uji otomatis LULUS — klaim kavling tersimpan & termuat lagi setelah server restart, klaim ganda atas petak yang sama ditolak, klaim dengan saldo kurang ditolak, Rumah Tingkat ditolak di Kavling 1, rumah pemain A terlihat benar oleh klien B, dan pemain tidak menembus rumah (collider aktif).
+**Selesai bila:** ✅ TERBUKTI `test:plots` (18 Nov 2026) — klaim kavling tersimpan & termuat lagi setelah server restart, klaim ganda atas petak yang sama ditolak, klaim dengan saldo kurang ditolak, Rumah Tingkat ditolak di Kavling 1, rumah pemain A terlihat benar oleh klien B, dan pemain tidak menembus rumah (collider aktif).
 
 ## Tahap 6B — Kebutuhan Hidup, Pekerjaan Baru & Waktu Dunia
 
