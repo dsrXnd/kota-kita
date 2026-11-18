@@ -2,6 +2,14 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, appendF
 import { join } from "path";
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import {
+  QUEST_BY_ID,
+  QUEST_ZONE_BY_ID,
+  emptyQuestDay,
+  questStatusList,
+  type QuestDayData,
+  type QuestProgressInfo,
+} from "../quests/quests";
+import {
   KC_START_BALANCE,
   JOBS,
   MAX_SKIP_PER_DAY,
@@ -55,6 +63,8 @@ export interface EconomyData {
   needs: NeedsState;
   /** Jumlah suvenir batik yang dibeli dari lapak pemain (Tahap 7) — koleksi persisten. */
   souvenirs: number;
+  /** Kemajuan quest sosial harian (Tahap 9) — diatur ulang per hari Asia/Jakarta. */
+  quests: QuestDayData;
   /** Catatan mutasi sederhana (maks. 50 entri terakhir). */
   ledger: Array<{ ts: number; delta: number; reason: string; balanceAfter: number }>;
 }
@@ -69,6 +79,7 @@ export function defaultEconomy(): EconomyData {
     jobLastDone: {},
     needs: fullNeeds(),
     souvenirs: 0,
+    quests: emptyQuestDay(jakartaDayKey(Date.now())),
     ledger: [],
   };
 }
@@ -155,6 +166,13 @@ export class AccountStore {
       user.economy.jobLastDone ??= {};
       user.economy.needs ??= fullNeeds();
       user.economy.souvenirs ??= 0;
+      if (!user.economy.quests || typeof user.economy.quests.day !== "string") {
+        user.economy.quests = emptyQuestDay(jakartaDayKey(Date.now()));
+      }
+      user.economy.quests.zones = Array.isArray(user.economy.quests.zones) ? user.economy.quests.zones.filter((z) => QUEST_ZONE_BY_ID.has(z)) : [];
+      user.economy.quests.greeted = Array.isArray(user.economy.quests.greeted) ? user.economy.quests.greeted.filter((v) => typeof v === "string") : [];
+      user.economy.quests.jobDone = user.economy.quests.jobDone === true;
+      user.economy.quests.paid = Array.isArray(user.economy.quests.paid) ? user.economy.quests.paid.filter((id) => QUEST_BY_ID.has(id)) : [];
       for (const k of ["hunger", "thirst", "toilet"] as const) {
         const v = user.economy.needs[k];
         user.economy.needs[k] = typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 100;
@@ -438,6 +456,100 @@ export class AccountStore {
     user.economy.souvenirs = (user.economy.souvenirs ?? 0) + 1;
     this.save();
     return user.economy.souvenirs;
+  }
+
+  // ---------- Quest Sosial Harian (Tahap 9) ----------
+  // Kemajuan hanya berubah lewat metode ini (dipanggil room dari peristiwa
+  // server: posisi pemain, emote wave, dan sif selesai). Hadiah dibayar
+  // SEKETIKA saat target tercapai lewat applyDelta yang sama seperti gaji,
+  // lengkap dengan catatan ledger — dan hanya sekali per quest per hari.
+
+  /** Data quest akun untuk hari ini; berganti hari = data baru yang kosong. */
+  private questData(user: UserRecord): QuestDayData {
+    const today = jakartaDayKey(Date.now());
+    if (!user.economy.quests || user.economy.quests.day !== today) {
+      user.economy.quests = emptyQuestDay(today);
+    }
+    return user.economy.quests;
+  }
+
+  /** Status semua quest harian akun (untuk payload panel client). */
+  questStatus(usernameLower: string): QuestProgressInfo[] | null {
+    const user = this.db.users[usernameLower];
+    if (!user) return null;
+    const before = user.economy.quests?.day;
+    const data = this.questData(user);
+    if (before !== data.day) this.save();
+    return questStatusList(data);
+  }
+
+  /** Selesaikan pembayaran satu quest bila targetnya tercapai & belum dibayar hari ini. */
+  private payQuestIfComplete(
+    user: UserRecord,
+    data: QuestDayData,
+    questId: string,
+    progress: number
+  ): { reward: number; balance: number } {
+    const def = QUEST_BY_ID.get(questId);
+    if (!def || progress < def.target || data.paid.includes(questId)) {
+      return { reward: 0, balance: user.economy.balance };
+    }
+    data.paid.push(questId);
+    const balance = this.applyDelta(user, def.reward, `Quest harian: ${def.name}`);
+    return { reward: def.reward, balance };
+  }
+
+  /** Catat kunjungan ke satu zona quest Jelajah Kota. */
+  recordQuestZone(
+    usernameLower: string,
+    zoneId: string
+  ): { changed: boolean; reward: number; balance: number; quests: QuestProgressInfo[] } | null {
+    const user = this.db.users[usernameLower];
+    if (!user || !QUEST_ZONE_BY_ID.has(zoneId)) return null;
+    const data = this.questData(user);
+    let changed = false;
+    if (!data.zones.includes(zoneId)) {
+      data.zones.push(zoneId);
+      changed = true;
+    }
+    const paid = this.payQuestIfComplete(user, data, "jelajah", Math.min(data.zones.length, QUEST_BY_ID.get("jelajah")!.target));
+    if (changed || paid.reward > 0) this.save();
+    return { changed: changed || paid.reward > 0, reward: paid.reward, balance: paid.balance, quests: questStatusList(data) };
+  }
+
+  /** Catat sapaan wave ke warga berakun lain (yang sama hanya dihitung sekali sehari). */
+  recordQuestGreets(
+    usernameLower: string,
+    targetAccountKeys: ReadonlyArray<string>
+  ): { changed: boolean; reward: number; balance: number; quests: QuestProgressInfo[] } | null {
+    const user = this.db.users[usernameLower];
+    if (!user) return null;
+    const data = this.questData(user);
+    let changed = false;
+    for (const target of targetAccountKeys) {
+      if (!target || target === usernameLower || !this.db.users[target]) continue;
+      if (!data.greeted.includes(target)) {
+        data.greeted.push(target);
+        changed = true;
+      }
+    }
+    const paid = this.payQuestIfComplete(user, data, "sapa", Math.min(data.greeted.length, QUEST_BY_ID.get("sapa")!.target));
+    if (changed || paid.reward > 0) this.save();
+    return { changed: changed || paid.reward > 0, reward: paid.reward, balance: paid.balance, quests: questStatusList(data) };
+  }
+
+  /** Catat satu sif pekerjaan yang selesai untuk quest Kerja Keras. */
+  recordQuestJob(
+    usernameLower: string
+  ): { changed: boolean; reward: number; balance: number; quests: QuestProgressInfo[] } | null {
+    const user = this.db.users[usernameLower];
+    if (!user) return null;
+    const data = this.questData(user);
+    const changed = !data.jobDone;
+    data.jobDone = true;
+    const paid = this.payQuestIfComplete(user, data, "kerja", 1);
+    if (changed || paid.reward > 0) this.save();
+    return { changed: changed || paid.reward > 0, reward: paid.reward, balance: paid.balance, quests: questStatusList(data) };
   }
 
   appendChatLog(entry: unknown) {
